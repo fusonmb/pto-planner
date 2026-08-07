@@ -251,7 +251,7 @@
         <div class="row"><strong id="edDate"></strong>
           <span class="holinfo" id="edHolInfo"></span></div>
         <div class="row">
-          <input type="number" id="edHours" min="0" max="24" step="0.25"> h/day
+          <input type="number" id="edHours" min="0" max="8" step="0.25"> h/day
           <input type="text" id="edLabel" maxlength="80"
                  placeholder="Label (e.g. Hawaii trip)">
         </div>
@@ -266,9 +266,9 @@
           <span class="hint">holiday name comes from the label box</span>
         </div>
         <div class="hint">Each Save applies the h/day amount as that leave
-          type; a day can hold both. Parental leave is whole hours only.
-          Clear removes everything on the selected days. Weekends and
-          holidays are always skipped.</div>
+          type; a day can hold both, up to 8 h combined. Parental leave is
+          whole hours only. Clear removes everything on the selected days.
+          Weekends and holidays are always skipped.</div>
         <div class="err" id="edErr"></div>
       </div>
     </div>
@@ -317,6 +317,7 @@ const CAP_BASE = 240;
 const CAP_AFTER_9YRS = 320;
 const DEFAULT_HIRE_DATE = "2018-11-13";   // 9-year mark: Nov 13, 2027
 const PARENTAL_TOTAL = 480;               // 12 weeks x 40 h per benefit year
+const MAX_DAY_HOURS = 8;                  // combined B + NR limit per day
 const PERIOD_DAYS = 14;
 const STORE_KEY = "leavePlannerData";
 const LEGACY_STORE_KEY = "ptoPlannerData";   // 1.0 planner's storage
@@ -516,8 +517,9 @@ function applyEntry({dates, hours, label, leaveType, clear}) {
   const leave = (leaveType || "B").toUpperCase();
   if (leave !== "B" && leave !== "NR")
     return {ok: false, error: "Unknown leave type."};
-  if (!(hours >= 0 && hours <= 24))
-    return {ok: false, error: "Hours must be 0-24."};
+  if (!(hours >= 0 && hours <= MAX_DAY_HOURS))
+    return {ok: false, error: `Hours must be 0-${MAX_DAY_HOURS} — a day `
+                              + "holds at most 8 h of leave."};
   if (leave === "NR" && !clear && hours !== Math.round(hours))
     return {ok: false, error: "Parental leave is taken in 1-hour increments."};
   const data = loadData();
@@ -536,7 +538,7 @@ function applyEntry({dates, hours, label, leaveType, clear}) {
         ? "Selected day(s) are weekends/holidays — they never receive leave."
         : `Dates on or before ${anchorIso} are already reflected in the `
           + "starting balance."};
-  let windowSkipped = [], unfilled = 0;
+  let windowSkipped = [], unfilled = 0, clamped = 0, fullSkipped = 0;
   const nrFill = {};
   if (leave === "NR" && !clear && hours > 0) {
     const birth = effectiveBirth(data);
@@ -557,27 +559,38 @@ function applyEntry({dates, hours, label, leaveType, clear}) {
       if (!sel.has(k)) otherNR += e.nr || 0;
     let budget = PARENTAL_TOTAL - otherNR;
     for (const d of [...valid].sort()) {
-      const give = Math.min(hours, Math.floor(budget));   // whole hours only
-      if (give >= 1) { nrFill[d] = give; budget -= give; }
-      else unfilled++;
+      const curB = (data.entries[d] || {}).b || 0;
+      const room = Math.floor(MAX_DAY_HOURS - curB);   // 8 h/day combined
+      if (room < 1) { fullSkipped++; continue; }
+      const give = Math.min(hours, Math.floor(budget), room); // whole hours
+      if (give >= 1) {
+        nrFill[d] = give; budget -= give;
+        if (give < hours) clamped++;
+      } else unfilled++;
     }
     if (!Object.keys(nrFill).length)
-      return {ok: false, error: "No parental leave remains — the other "
-                                + "planned days already use all 480 h."};
+      return {ok: false, error: "Nothing to book — the selected day(s) are "
+                                + "full or no parental leave remains."};
   }
   for (const d of valid) {
     if (clear) { delete data.entries[d]; continue; }
     if (leave === "NR" && hours > 0 && !(d in nrFill)) continue;
     const e = data.entries[d] || {b: 0, nr: 0, label: ""};
-    if (leave === "B") e.b = r2(hours);
-    else e.nr = hours > 0 ? nrFill[d] : 0;
+    if (leave === "B") {
+      const give = Math.min(hours, MAX_DAY_HOURS - (e.nr || 0)); // 8 h/day
+      if (hours > 0 && give <= 0) { fullSkipped++; continue; }
+      if (hours > 0 && give < hours) clamped++;
+      e.b = hours > 0 ? r2(Math.max(0, give)) : 0;
+    } else {
+      e.nr = hours > 0 ? nrFill[d] : 0;
+    }
     e.label = label.slice(0, 80);
     if (e.b <= 0 && e.nr <= 0 && !e.label) delete data.entries[d];
     else data.entries[d] = e;
   }
   saveData(data);
   return {ok: true, skipped, holidaySkipped: holSkipped,
-          windowSkipped, unfilled};
+          windowSkipped, unfilled, clamped, fullSkipped};
 }
 
 function applyBirthDate({date: when}) {
@@ -943,6 +956,10 @@ async function saveLeave(leaveType) {
     notes.push(out.windowSkipped.length + " day(s) outside the parental window skipped");
   if (out.unfilled)
     notes.push(out.unfilled + " day(s) left unfilled — parental leave exhausted");
+  if (out.clamped)
+    notes.push(out.clamped + " day(s) reduced to fit the 8 h/day limit");
+  if (out.fullSkipped)
+    notes.push(out.fullSkipped + " day(s) already at 8 h skipped");
   if (out.skipped && out.skipped.length)
     notes.push(out.skipped.length + " day(s) on/before the anchor date skipped");
   // informational notes stay quiet on small screens; real errors still show
