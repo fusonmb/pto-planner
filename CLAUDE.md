@@ -1,5 +1,10 @@
 # Leave Planner — project context
 
+Repo: https://github.com/fusonmb/pto-planner (PUBLIC — it also serves the
+GitHub Pages deployment of index.html; never commit pto_data.json /
+leave_data.json / backups, they're gitignored because they encode the
+user's leave plan and child's birth date). Pull before working, push after.
+
 Personal leave-planning app for mfuson (MITRE). Two interchangeable builds
 kept in feature parity — **every change must be applied to BOTH**:
 
