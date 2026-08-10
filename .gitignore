@@ -1,0 +1,15 @@
+# generated / redundant (the repo itself is the backup)
+__pycache__/
+*.zip
+
+# unrelated personal files
+colorado-fire-restrictions.html
+index-pto-planner.html
+
+# machine-specific Claude Code permissions
+.claude/settings.local.json
+
+# personal plan data — this repo is PUBLIC (GitHub Pages); move data between
+# machines with the app's Backup/Restore buttons instead
+pto_data.json
+leave_data.json

@@ -1,0 +1,1312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leave Planner</title>
+<script>
+  document.documentElement.dataset.theme =
+      localStorage.getItem("ptoTheme") || "dark";
+</script>
+<style>
+  :root {
+    color-scheme: light;
+    --page:        #f9f9f7;
+    --surface:     #fcfcfb;
+    --ink:         #0b0b0b;
+    --ink-2:       #52514e;
+    --muted:       #898781;
+    --grid:        #e1e0d9;
+    --axis:        #c3c2b7;
+    --border:      rgba(11,11,11,0.10);
+    --series:      #2a78d6;
+    --leave-b:     #008300;   /* PTOB (B): green */
+    --leave-nr:    #d55181;   /* Parental (NR): pink */
+    --critical:    #d03b3b;
+    --warning:     #b97f00;
+    --hol-bg:      #e2f2e0;
+    --hol-ink:     #006300;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:        #0d0d0d;
+    --surface:     #1a1a19;
+    --ink:         #ffffff;
+    --ink-2:       #c3c2b7;
+    --muted:       #898781;
+    --grid:        #2c2c2a;
+    --axis:        #383835;
+    --border:      rgba(255,255,255,0.10);
+    --series:      #3987e5;
+    --leave-b:     #0ca30c;   /* PTOB (B): green, stepped for dark */
+    --leave-nr:    #e87ba4;   /* Parental (NR): pink, stepped for dark */
+    --critical:    #e66767;
+    --warning:     #fab219;
+    --hol-bg:      #1c2e1a;
+    --hol-ink:     #0ca30c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px;
+    background: var(--page); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0; }
+  .titlebar { display: flex; align-items: center; gap: 10px; margin-bottom: 2px; }
+  .titlebar .spacer { flex: 1; }
+  .sub { color: var(--ink-2); margin: 0 0 16px; font-size: 13px; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+           gap: 12px; margin-bottom: 16px; }
+  .tile { background: var(--surface); border: 1px solid var(--border);
+          border-radius: 10px; padding: 12px 14px; }
+  .tile .label { color: var(--muted); font-size: 12px; }
+  .tile .value { font-size: 24px; font-weight: 600; margin-top: 2px; }
+  .tile .note  { color: var(--ink-2); font-size: 12px; margin-top: 2px; }
+  .tile .value.bad  { color: var(--critical); }
+  .tile .value.editable { cursor: pointer; }
+  .tile .value.editable:hover { color: var(--series); }
+  .tile input {
+    width: 120px; font: inherit; font-size: 20px; font-weight: 600;
+    background: var(--page); color: var(--ink);
+    border: 1px solid var(--series); border-radius: 7px; padding: 2px 6px;
+  }
+
+  .cols { display: grid; grid-template-columns: minmax(400px, 480px) 1fr;
+          gap: 16px; align-items: start; }
+  @media (max-width: 940px) { .cols { grid-template-columns: 1fr; } }
+
+  .card { background: var(--surface); border: 1px solid var(--border);
+          border-radius: 10px; padding: 14px; }
+  .card h2 { font-size: 14px; margin: 0 0 10px; }
+
+  /* ---- calendar ---- */
+  .cal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .cal-head .month { font-weight: 600; flex: 1; text-align: center; }
+  button {
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 7px;
+    padding: 5px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--series); border-color: var(--series); color: #fff; }
+  .dow { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center;
+         color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px;
+          user-select: none; touch-action: pan-y; }
+  .day {
+    min-height: 76px; border: 1px solid transparent; border-radius: 7px;
+    padding: 3px 5px; cursor: pointer; font-size: 12px;
+    min-width: 0; overflow: hidden;
+  }
+  .day:hover { border-color: var(--muted); }
+  .day .num { color: var(--ink-2); }
+  .day.out .num { opacity: 0.5; }
+  .day.altperiod { background: color-mix(in srgb, var(--grid) 35%, transparent); }
+  .day.holiday { background: var(--hol-bg); }
+  .day.today { border-color: var(--series); }
+  .day.past .num { color: var(--muted); }
+  .day.selected { outline: 2px solid var(--series); }
+  .pto { display: block; width: fit-content; background: var(--series); color: #fff;
+         border-radius: 999px; padding: 0 7px; font-size: 11px; margin-top: 2px; }
+  .pto.b  { background: var(--leave-b); }
+  .pto.nr { background: var(--leave-nr); color: #1a1a19; }
+  button.saveb  { background: var(--leave-b); border-color: var(--leave-b); color: #fff; }
+  button.savenr { background: var(--leave-nr); border-color: var(--leave-nr); color: #1a1a19; }
+  .lbl { display: block; font-size: 10px; color: var(--ink-2); line-height: 1.25;
+         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .holname { display: block; font-size: 10px; color: var(--hol-ink); line-height: 1.25;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .accr { display: block; font-size: 10px; color: var(--muted); line-height: 1.25;
+          margin-top: 1px; }
+  .accr b { color: var(--ink-2); font-weight: 600; }
+  .accr.overdrawn b { color: var(--critical); }
+
+  /* ---- editor ---- */
+  .editor { border-top: 1px solid var(--grid); margin-top: 10px; padding-top: 10px; }
+  .editor .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+                 margin-bottom: 6px; }
+  .editor input[type=number] {
+    width: 80px; padding: 5px 8px; font: inherit;
+    background: var(--page); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 7px;
+  }
+  .editor input[type=text] {
+    flex: 1; min-width: 140px; padding: 5px 8px; font: inherit;
+    background: var(--page); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 7px;
+  }
+  .editor .hint { color: var(--muted); font-size: 12px; }
+  .editor .err { color: var(--critical); font-size: 12px; }
+  .editor .holinfo { color: var(--hol-ink); font-size: 12px; }
+
+  /* ---- chart ---- */
+  .chart-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .chart-head h2 { flex: 1; margin: 0; }
+  select { background: var(--surface); color: var(--ink); font: inherit;
+           border: 1px solid var(--border); border-radius: 7px; padding: 4px 8px; }
+  #chartbox { position: relative; }
+  #tooltip {
+    position: absolute; pointer-events: none; display: none; z-index: 5;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font-size: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.18); min-width: 150px; max-width: 240px;
+  }
+  #tooltip .t-date { color: var(--muted); margin-bottom: 3px; }
+  #tooltip .t-bal  { font-size: 15px; font-weight: 600; }
+  #tooltip .t-line { color: var(--ink-2); }
+  #tooltip .t-line.lost { color: var(--warning); }
+  #tooltip .t-line.od   { color: var(--critical); font-weight: 600; }
+  #tooltip .t-line.nr   { color: var(--leave-nr); }
+  .legend-note { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  svg text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif;
+             font-variant-numeric: tabular-nums; fill: var(--muted); }
+  svg .dlabel { fill: var(--ink-2); font-weight: 600; }
+  svg .hover-target { cursor: pointer; }
+
+  /* ---- hire-date footer ---- */
+  .foot { margin-top: 16px; display: flex; gap: 12px; align-items: center;
+          flex-wrap: wrap; font-size: 13px; }
+  .foot input[type=date] {
+    font: inherit; padding: 4px 8px; margin-left: 6px;
+    background: var(--page); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 7px;
+  }
+  .foot #hireInfo { color: var(--muted); font-size: 12px; }
+
+  /* ---- mobile-only adjustments (desktop is untouched) ---- */
+  .touch-hint { display: none; }
+  .mobile-tip { display: none; color: var(--muted); font-size: 11px;
+                margin: 2px 0 6px; }
+  #rangeHint { display: none; color: var(--series); font-size: 12px;
+               margin: 4px 0 6px; }
+  @media (max-width: 700px) {
+    body { padding: 12px; }
+    h1 { font-size: 18px; }
+    .titlebar { flex-wrap: wrap; }
+    /* declutter: hide explanatory text; the mobile tip covers the gestures */
+    .sub, .legend-note, .editor .hint { display: none; }
+    /* metrics are secondary on a phone: move them below calendar + chart */
+    .wrap { display: flex; flex-direction: column; }
+    .tiles { order: 3; margin-bottom: 0; margin-top: 12px;
+             grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .foot { order: 4; }
+    .tile { padding: 9px 10px; }
+    .tile .value { font-size: 19px; }
+    .cols { gap: 12px; }
+    .card { padding: 10px; }
+    .day { min-height: 58px; padding: 2px 3px; font-size: 11px; }
+    .pto { font-size: 10px; padding: 0 5px; }
+    .accr, .lbl, .holname { font-size: 9px; }
+  }
+  @media (pointer: coarse) {
+    button { padding: 8px 12px; }
+    .grid { -webkit-touch-callout: none; }
+    .touch-hint { display: inline; }
+    .mobile-tip { display: block; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="titlebar">
+    <h1>Leave Planner</h1>
+    <div class="spacer"></div>
+    <button id="themeBtn" title="Toggle light/dark">Theme</button>
+    <button id="unitsBtn" title="Display in hours or days (8 h = 1 d)"></button>
+    <button id="backupBtn" title="Download your data as a JSON file">Backup data</button>
+    <button id="restoreBtn" title="Load data from a backup JSON file">Restore</button>
+    <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+  </div>
+  <p class="sub"><b style="color:var(--leave-b)">PTOB (B), green</b>:
+     6.7692 h accrue every two weeks, 8.000 h after nine years
+     (balance posts every other Sunday); cap 240 h, 320 h after nine years;
+     <span id="subAnchor"></span> &middot;
+     <b style="color:var(--leave-nr)">Parental (NR), pink</b>:
+     480 h (12 weeks) from the child's birth date, 1-h increments,
+     expires one year after birth &middot;
+     weekends &amp; holidays never receive leave; calendar shading
+     alternates by pay period.
+     Click a day &mdash; or click and drag &mdash; then Save.
+     <span class="touch-hint">On touch: long-press a day to start a range,
+     then tap the last day.</span>
+     Data is saved in this browser; use Backup for a portable copy.</p>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="cols">
+    <div class="card">
+      <div class="cal-head">
+        <button id="prev" title="Previous month">&#8249;</button>
+        <div class="month" id="monthLabel"></div>
+        <button id="todayBtn">Today</button>
+        <button id="next" title="Next month">&#8250;</button>
+      </div>
+      <div class="dow"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+      <div class="mobile-tip">Tap a day &middot; hold to start a range</div>
+      <div id="rangeHint">Range started &mdash; tap the last day of the range.</div>
+      <div class="grid" id="calGrid"></div>
+      <div class="editor" id="editor" style="display:none">
+        <div class="row"><strong id="edDate"></strong>
+          <span class="holinfo" id="edHolInfo"></span></div>
+        <div class="row">
+          <input type="number" id="edHours" min="0" max="8" step="0.25"> h/day
+          <input type="text" id="edLabel" maxlength="80"
+                 placeholder="Label (e.g. Hawaii trip)">
+        </div>
+        <div class="row">
+          <button class="saveb" id="edSaveB">Save (PTOB)</button>
+          <button class="savenr" id="edSaveNR">Save (Parent)</button>
+          <button id="edClear">Clear</button>
+        </div>
+        <div class="row">
+          <button id="edHoliday">Mark as holiday</button>
+          <button id="edUnholiday">Remove holiday</button>
+          <span class="hint">holiday name comes from the label box</span>
+        </div>
+        <div class="hint">Each Save applies the h/day amount as that leave
+          type; a day can hold both, up to 8 h combined. Parental leave is
+          whole hours only. Clear removes everything on the selected days.
+          Weekends and holidays are always skipped.</div>
+        <div class="err" id="edErr"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="chart-head">
+        <h2>Projected balance</h2>
+        <label>Horizon
+          <select id="horizon">
+            <option value="6">6 months</option>
+            <option value="12" selected>12 months</option>
+            <option value="18">18 months</option>
+            <option value="24">24 months</option>
+          </select>
+        </label>
+      </div>
+      <div id="chartbox">
+        <svg id="chart" width="100%" height="340"></svg>
+        <div id="tooltip"></div>
+      </div>
+      <div class="legend-note"><b style="color:var(--leave-b)">Green</b> = PTOB
+        balance at each period Sunday; dashed line = its cap (steps up at the
+        9-year mark); red points = overdrawn.
+        <b style="color:var(--leave-nr)">Pink</b> = parental leave remaining,
+        from birth until the red dotted line one year later.
+        Click a point to jump the calendar there.</div>
+    </div>
+  </div>
+
+  <div class="card foot">
+    <label>Hire date <input type="date" id="hireDate"></label>
+    <label>Child's birth date <input type="date" id="birthDate"></label>
+    <button id="birthClear" title="Remove birth date">&#10005;</button>
+    <span id="hireInfo"></span>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================ calc engine */
+const ORIGINAL_ANCHOR = "2026-07-26";     // a period Sunday
+const ORIGINAL_BALANCE = 135.92;
+const ACCRUAL_BASE = 6.7692;              // hours per two-week period
+const ACCRUAL_AFTER_9YRS = 8.0;           // rate after nine years employed
+const CAP_BASE = 240;
+const CAP_AFTER_9YRS = 320;
+const DEFAULT_HIRE_DATE = "2018-11-13";   // 9-year mark: Nov 13, 2027
+const PARENTAL_TOTAL = 480;               // 12 weeks x 40 h per benefit year
+const MAX_DAY_HOURS = 8;                  // combined B + NR limit per day
+const PERIOD_DAYS = 14;
+const STORE_KEY = "leavePlannerData";
+const LEGACY_STORE_KEY = "ptoPlannerData";   // 1.0 planner's storage
+
+const BUILTIN_HOLIDAYS = {
+  "2026-01-01": "New Year's Day",
+  "2026-01-19": "Martin Luther King Jr. Day",
+  "2026-05-25": "Memorial Day",
+  "2026-07-03": "Independence Day (observed)",
+  "2026-09-07": "Labor Day",
+  "2026-11-26": "Thanksgiving",
+  "2026-12-25": "Christmas Day",
+  "2027-01-01": "New Year's Day",
+  "2027-01-18": "Martin Luther King Jr. Day",
+  "2027-05-31": "Memorial Day",
+  "2027-07-05": "Independence Day (observed)",
+  "2027-09-06": "Labor Day",
+  "2027-11-25": "Thanksgiving",
+  "2027-12-24": "Christmas Day (observed)",
+  "2027-12-31": "New Year's Day (observed)",
+  "2028-01-17": "Martin Luther King Jr. Day",
+  "2028-05-29": "Memorial Day",
+  "2028-07-04": "Independence Day",
+  "2028-09-04": "Labor Day",
+  "2028-11-23": "Thanksgiving",
+  "2028-12-25": "Christmas Day",
+  "2029-01-01": "New Year's Day",
+  "2029-01-15": "Martin Luther King Jr. Day",
+  "2029-05-28": "Memorial Day",
+  "2029-07-04": "Independence Day",
+  "2029-09-03": "Labor Day",
+  "2029-11-22": "Thanksgiving",
+  "2029-12-25": "Christmas Day",
+  "2030-01-01": "New Year's Day",
+  "2030-01-14": "Holiday (per 2030 pay calendar)",
+  "2030-05-27": "Memorial Day",
+  "2030-07-04": "Independence Day",
+  "2030-09-02": "Labor Day",
+  "2030-11-28": "Thanksgiving",
+  "2030-12-25": "Christmas Day",
+};
+
+const r2 = v => Math.round(v * 100) / 100;
+
+function normalizeData(raw) {
+  const data = {entries: {}, holidays: {}, removedHolidays: [],
+                anchor: null, hireDate: null, birthDate: null};
+  if (!raw || typeof raw !== "object") return data;
+  if (raw.hireDate && /^\d{4}-\d{2}-\d{2}$/.test(String(raw.hireDate)))
+    data.hireDate = String(raw.hireDate);
+  if (raw.birthDate && /^\d{4}-\d{2}-\d{2}$/.test(String(raw.birthDate)))
+    data.birthDate = String(raw.birthDate);
+  for (const [k, v] of Object.entries(raw.entries || {})) {
+    if (typeof v === "number") data.entries[k] = {b: v, nr: 0, label: ""};
+    else if (v && typeof v === "object" && ("b" in v || "nr" in v))
+      data.entries[k] = {b: +v.b || 0, nr: +v.nr || 0,
+                         label: String(v.label || "")};
+    else if (v && typeof v === "object")   // 1.0 format: {hours, label}
+      data.entries[k] = {b: +v.hours || 0, nr: 0,
+                         label: String(v.label || "")};
+  }
+  for (const [k, v] of Object.entries(raw.holidays || {}))
+    data.holidays[k] = String(v);
+  data.removedHolidays = Array.isArray(raw.removedHolidays)
+      ? raw.removedHolidays.map(String) : [];
+  const a = raw.anchor;
+  if (a && typeof a === "object" && a.date && isFinite(+a.balance))
+    data.anchor = {date: String(a.date), balance: +a.balance};
+  return data;
+}
+
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY) ||
+                localStorage.getItem(LEGACY_STORE_KEY);   // migrate from 1.0
+    if (raw) return normalizeData(JSON.parse(raw));
+  } catch (e) { /* fall through */ }
+  // fresh start: no days off, original anchor; built-in holidays still apply
+  return normalizeData(null);
+}
+
+function saveData(data) {
+  localStorage.setItem(STORE_KEY, JSON.stringify(data));
+}
+
+function effectiveAnchor(data) {
+  if (data.anchor) return [data.anchor.date, data.anchor.balance];
+  return [ORIGINAL_ANCHOR, ORIGINAL_BALANCE];
+}
+
+function effectiveHire(data) {
+  return data.hireDate || DEFAULT_HIRE_DATE;
+}
+
+function effectiveBirth(data) {
+  return data.birthDate || null;
+}
+
+function addYearsIso(isoStr, n) {
+  const d = parseISO(isoStr);
+  const m = d.getUTCMonth(), day = d.getUTCDate();
+  d.setUTCFullYear(d.getUTCFullYear() + n);
+  if (d.getUTCMonth() !== m) d.setUTCDate(0);   // Feb 29 -> Feb 28
+  return iso(d);
+}
+
+function mergedHolidays(data) {
+  const out = {};
+  for (const [d, name] of Object.entries(BUILTIN_HOLIDAYS))
+    if (!data.removedHolidays.includes(d)) out[d] = {name, builtin: true};
+  for (const [d, name] of Object.entries(data.holidays))
+    out[d] = {name, builtin: false};
+  return out;
+}
+
+function localTodayIso() {
+  const t = new Date();
+  const p = n => String(n).padStart(2, "0");
+  return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`;
+}
+
+function computeProjection(entries, todayIso, anchorIso, anchorBal, hireIso,
+                           birthIso) {
+  // PTOB: accrual and cap step up at the nine-year employment mark; running
+  // balance keeps full precision.  Parental (NR): rows carry the remaining
+  // 480 h from the birth date; it hits zero one year later and never goes
+  // negative.
+  const nineYears = addYearsIso(hireIso || DEFAULT_HIRE_DATE, 9);
+  const expiry = birthIso ? addYearsIso(birthIso, 1) : null;
+  const nrRem = asOf => {
+    if (!birthIso || asOf < birthIso) return null;
+    if (asOf >= expiry) return 0;
+    let used = 0;
+    for (const [d, e] of Object.entries(entries))
+      if (d >= birthIso && d <= asOf) used += e.nr || 0;
+    return r2(Math.max(0, PARENTAL_TOTAL - used));
+  };
+  const rows = [{date: anchorIso, used: 0, accrued: 0, lost: 0,
+                 balance: anchorBal,
+                 cap: anchorIso >= nineYears ? CAP_AFTER_9YRS : CAP_BASE,
+                 nrUsed: 0, nrRemaining: nrRem(anchorIso),
+                 overdrawn: false}];
+  let balance = anchorBal;
+  const end = parseISO(todayIso);
+  end.setUTCMonth(end.getUTCMonth() + 36);
+  const sunday = parseISO(anchorIso);
+  sunday.setUTCDate(sunday.getUTCDate() + PERIOD_DAYS);
+  while (sunday <= end) {
+    const s1 = iso(sunday);
+    const senior = s1 >= nineYears;
+    const rate = senior ? ACCRUAL_AFTER_9YRS : ACCRUAL_BASE;
+    const cap = senior ? CAP_AFTER_9YRS : CAP_BASE;
+    const start = new Date(sunday);
+    start.setUTCDate(start.getUTCDate() - (PERIOD_DAYS - 1));
+    const s0 = iso(start);
+    let used = 0, nrUsed = 0;
+    for (const [d, e] of Object.entries(entries))
+      if (d >= s0 && d <= s1) { used += e.b || 0; nrUsed += e.nr || 0; }
+    used = r2(used); nrUsed = r2(nrUsed);
+    const afterUse = balance - used;
+    const preCap = afterUse + rate;
+    const lost = Math.max(0, preCap - cap);
+    balance = Math.min(preCap, cap);
+    rows.push({date: s1, used, accrued: rate, lost: r2(lost),
+               balance: r2(balance), cap,
+               nrUsed, nrRemaining: nrRem(s1),
+               overdrawn: afterUse < 0 || balance < 0});
+    sunday.setUTCDate(sunday.getUTCDate() + PERIOD_DAYS);
+  }
+  return rows;
+}
+
+function buildState() {
+  const data = loadData();
+  const today = localTodayIso();
+  const [anchorIso, anchorBal] = effectiveAnchor(data);
+  const hire = effectiveHire(data);
+  const birth = effectiveBirth(data);
+  return {
+    anchor: anchorIso, anchorBalance: anchorBal,
+    anchorEdited: data.anchor !== null,
+    accrual: ACCRUAL_BASE, periodDays: PERIOD_DAYS, cap: CAP_BASE, today,
+    hireDate: hire,
+    nineYearDate: addYearsIso(hire, 9),
+    birthDate: birth,
+    parentalExpiry: birth ? addYearsIso(birth, 1) : null,
+    parentalTotal: PARENTAL_TOTAL,
+    entries: data.entries,
+    holidays: mergedHolidays(data),
+    projection: computeProjection(data.entries, today, anchorIso, anchorBal,
+                                  hire, birth),
+  };
+}
+
+/* --------- local equivalents of the old server endpoints --------- */
+function applyEntry({dates, hours, label, leaveType, clear}) {
+  const leave = (leaveType || "B").toUpperCase();
+  if (leave !== "B" && leave !== "NR")
+    return {ok: false, error: "Unknown leave type."};
+  if (!(hours >= 0 && hours <= MAX_DAY_HOURS))
+    return {ok: false, error: `Hours must be 0-${MAX_DAY_HOURS} — a day `
+                              + "holds at most 8 h of leave."};
+  if (leave === "NR" && !clear && hours !== Math.round(hours))
+    return {ok: false, error: "Parental leave is taken in 1-hour increments."};
+  const data = loadData();
+  const [anchorIso] = effectiveAnchor(data);
+  const hols = mergedHolidays(data);
+  const skipped = dates.filter(d => d <= anchorIso);
+  let valid = dates.filter(d => d > anchorIso);
+  let holSkipped = [];
+  if (!clear && (hours > 0 || label)) {
+    // leave (and labels) never lands on weekends or holidays
+    holSkipped = valid.filter(d => hols[d] || isWeekend(d));
+    valid = valid.filter(d => !hols[d] && !isWeekend(d));
+  }
+  if (!valid.length)
+    return {ok: false, error: holSkipped.length
+        ? "Selected day(s) are weekends/holidays — they never receive leave."
+        : `Dates on or before ${anchorIso} are already reflected in the `
+          + "starting balance."};
+  let windowSkipped = [], unfilled = 0, clamped = 0, fullSkipped = 0;
+  const nrFill = {};
+  if (leave === "NR" && !clear && hours > 0) {
+    const birth = effectiveBirth(data);
+    if (!birth)
+      return {ok: false, error: "Set the child's birth date (bottom of the "
+                                + "page) before saving parental leave."};
+    const expiry = addYearsIso(birth, 1);
+    // days outside the birth..expiry window are skipped, not fatal
+    windowSkipped = valid.filter(d => d < birth || d >= expiry);
+    valid = valid.filter(d => d >= birth && d < expiry);
+    if (!valid.length)
+      return {ok: false, error: `Parental leave runs ${birth} to ${expiry} — `
+                                + "no selected day falls inside that window."};
+    // fill days in order until the 480 h pool runs dry — never negative
+    const sel = new Set(valid);
+    let otherNR = 0;
+    for (const [k, e] of Object.entries(data.entries))
+      if (!sel.has(k)) otherNR += e.nr || 0;
+    let budget = PARENTAL_TOTAL - otherNR;
+    for (const d of [...valid].sort()) {
+      const curB = (data.entries[d] || {}).b || 0;
+      const room = Math.floor(MAX_DAY_HOURS - curB);   // 8 h/day combined
+      if (room < 1) { fullSkipped++; continue; }
+      const give = Math.min(hours, Math.floor(budget), room); // whole hours
+      if (give >= 1) {
+        nrFill[d] = give; budget -= give;
+        if (give < hours) clamped++;
+      } else unfilled++;
+    }
+    if (!Object.keys(nrFill).length)
+      return {ok: false, error: "Nothing to book — the selected day(s) are "
+                                + "full or no parental leave remains."};
+  }
+  for (const d of valid) {
+    if (clear) { delete data.entries[d]; continue; }
+    if (leave === "NR" && hours > 0 && !(d in nrFill)) continue;
+    const e = data.entries[d] || {b: 0, nr: 0, label: ""};
+    if (leave === "B") {
+      const give = Math.min(hours, MAX_DAY_HOURS - (e.nr || 0)); // 8 h/day
+      if (hours > 0 && give <= 0) { fullSkipped++; continue; }
+      if (hours > 0 && give < hours) clamped++;
+      e.b = hours > 0 ? r2(Math.max(0, give)) : 0;
+    } else {
+      e.nr = hours > 0 ? nrFill[d] : 0;
+    }
+    e.label = label.slice(0, 80);
+    if (e.b <= 0 && e.nr <= 0 && !e.label) delete data.entries[d];
+    else data.entries[d] = e;
+  }
+  saveData(data);
+  return {ok: true, skipped, holidaySkipped: holSkipped,
+          windowSkipped, unfilled, clamped, fullSkipped};
+}
+
+function applyBirthDate({date: when}) {
+  if (when && !/^\d{4}-\d{2}-\d{2}$/.test(when))
+    return {ok: false, error: "Bad date."};
+  const data = loadData();
+  data.birthDate = when || null;
+  saveData(data);
+  return {ok: true};
+}
+
+function applyHoliday({dates, name, remove}) {
+  const data = loadData();
+  for (const d of dates) {
+    if (remove) {
+      delete data.holidays[d];
+      if (BUILTIN_HOLIDAYS[d] && !data.removedHolidays.includes(d))
+        data.removedHolidays.push(d);
+    } else {
+      data.holidays[d] = (name || "Holiday").slice(0, 80);
+      data.removedHolidays = data.removedHolidays.filter(x => x !== d);
+    }
+  }
+  saveData(data);
+  return {ok: true};
+}
+
+function applyHireDate({date: when}) {
+  if (!when || !/^\d{4}-\d{2}-\d{2}$/.test(when))
+    return {ok: false, error: "Bad date."};
+  const data = loadData();
+  data.hireDate = when;
+  saveData(data);
+  return {ok: true};
+}
+
+function applyAnchor({balance, date: when}) {
+  if (!(balance >= -CAP_AFTER_9YRS && balance <= CAP_AFTER_9YRS))
+    return {ok: false, error:
+        `Balance must be between -${CAP_AFTER_9YRS} and ${CAP_AFTER_9YRS}.`};
+  const today = localTodayIso();
+  if (!when) {
+    const periods = Math.max(0, Math.floor(
+        (parseISO(today) - parseISO(ORIGINAL_ANCHOR)) / 86400000 / PERIOD_DAYS));
+    const d = parseISO(ORIGINAL_ANCHOR);
+    d.setUTCDate(d.getUTCDate() + periods * PERIOD_DAYS);
+    when = iso(d);
+  }
+  const diff = (parseISO(when) - parseISO(ORIGINAL_ANCHOR)) / 86400000;
+  if (diff % PERIOD_DAYS !== 0)
+    return {ok: false, error: "Date must be a period Sunday on the accrual calendar."};
+  if (when > today)
+    return {ok: false, error: "Date can't be in the future."};
+  const data = loadData();
+  data.anchor = {date: when, balance: r2(balance)};
+  saveData(data);
+  return {ok: true, date: when};
+}
+
+/* ============================================================ UI */
+let STATE = null;
+let viewYear, viewMonth;          // calendar month being shown
+let selection = new Set();        // ISO dates currently selected
+let dragging = false, dragAnchor = null, dragMoved = false;
+// touch-only range selection (long-press to start, tap to finish)
+let touchRange = {active: false, anchor: null};
+let suppressOpen = false, longPressTimer = null, lastPointerType = "mouse";
+
+const $ = id => document.getElementById(id);
+const fmtH = v => (Math.round(v * 100) / 100).toLocaleString("en-US",
+                  {minimumFractionDigits: 2, maximumFractionDigits: 2});
+// display units: all math stays in hours; "d" only converts what is shown
+let UNITS = localStorage.getItem("ptoUnits") || "h";
+const HRS_PER_DAY = 8;
+const cv = v => UNITS === "d" ? v / HRS_PER_DAY : v;
+const fmtU = v => fmtH(cv(v));
+const unitSuffix = () => UNITS;
+const iso = d => d.toISOString().slice(0, 10);
+const parseISO = s => { const [y,m,dd] = s.split("-").map(Number);
+                        return new Date(Date.UTC(y, m - 1, dd)); };
+const fmtDate = s => parseISO(s).toLocaleDateString("en-US",
+                  {timeZone:"UTC", weekday:"short", month:"short", day:"numeric", year:"numeric"});
+const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                  .replace(/"/g, "&quot;");
+const PERIOD_EPOCH = Date.UTC(2026, 6, 26);   // a period Sunday (grid anchor)
+const isWeekend = ds => { const dow = parseISO(ds).getUTCDay();
+                          return dow === 0 || dow === 6; };
+// which two-week pay period a date falls in (periods end on grid Sundays)
+const periodIndex = ds => Math.floor(
+    ((parseISO(ds).getTime() - PERIOD_EPOCH) / 86400000 + 13) / 14);
+
+function fetchState() {
+  STATE = buildState();
+  STATE.projByDate = {};
+  for (const row of STATE.projection) STATE.projByDate[row.date] = row;
+}
+
+function entryB(ds)  { const e = STATE.entries[ds]; return e ? (e.b  || 0) : 0; }
+function entryNR(ds) { const e = STATE.entries[ds]; return e ? (e.nr || 0) : 0; }
+
+// parental hours remaining as of a date (null before birth / no birth set)
+function nrRemainingAt(ds) {
+  if (!STATE.birthDate || ds < STATE.birthDate) return null;
+  if (ds >= STATE.parentalExpiry) return 0;
+  let used = 0;
+  for (const [d, e] of Object.entries(STATE.entries))
+    if (d >= STATE.birthDate && d <= ds) used += e.nr || 0;
+  return Math.max(0, STATE.parentalTotal - used);
+}
+
+async function post(url, body) {
+  // same call sites as the server version, resolved locally
+  if (url === "/api/entry") return applyEntry(body);
+  if (url === "/api/holiday") return applyHoliday(body);
+  if (url === "/api/anchor") return applyAnchor(body);
+  if (url === "/api/hiredate") return applyHireDate(body);
+  if (url === "/api/birthdate") return applyBirthDate(body);
+  return {ok: false, error: "Unknown action."};
+}
+
+/* ------------------------------------------------ summary tiles */
+function renderTiles() {
+  $("subAnchor").textContent = "anchor " + fmtU(STATE.anchorBalance) + " " +
+      unitSuffix() + " on " +
+      fmtDate(STATE.anchor) + (STATE.anchorEdited ? " (edited)" : "");
+  const today = STATE.today;
+  const proj = STATE.projection;
+  let current = proj[0], next = null;
+  for (const row of proj) {
+    if (row.date <= today) current = row;
+    else if (!next) next = row;
+  }
+  const horizonMonths = +$("horizon").value;
+  const endD = parseISO(today); endD.setUTCMonth(endD.getUTCMonth() + horizonMonths);
+  const shown = proj.filter(r => r.date <= iso(endD));
+  const lost = shown.reduce((a, r) => a + r.lost, 0);
+  const firstOver = shown.find(r => r.overdrawn);
+  const futureDays = Object.entries(STATE.entries)
+      .filter(([d, e]) => d > today && (e.b > 0 || e.nr > 0));
+  const plannedFuture = futureDays.reduce((a, [, e]) => a + (e.b || 0), 0);
+
+  const tiles = [
+    {label: "Current balance", value: fmtU(current.balance) + " " + unitSuffix(),
+     note: "as of " + fmtDate(current.date) + " · click value to edit"},
+    {label: "Next accrual",
+     value: "+" + fmtU(next ? next.accrued : STATE.accrual) + " " + unitSuffix(),
+     note: next ? "posts " + fmtDate(next.date) : ""},
+    {label: "Planned PTO (future)", value: fmtU(plannedFuture) + " " + unitSuffix(),
+     note: futureDays.length + " day(s) marked"},
+    {label: "Lost to cap", value: fmtU(lost) + " " + unitSuffix(),
+     note: "next " + horizonMonths + " months", bad: lost > 0},
+  ];
+  if (STATE.birthDate && today < STATE.parentalExpiry) {
+    // count every planned parental day, past and future
+    let booked = 0;
+    for (const e of Object.values(STATE.entries)) booked += e.nr || 0;
+    const rem = Math.max(0, STATE.parentalTotal - booked);
+    tiles.push({label: "Parental leave left",
+                value: fmtU(rem) + " " + unitSuffix(),
+                note: "after planned days · expires " + fmtDate(STATE.parentalExpiry),
+                bad: rem <= 0});
+  }
+  if (firstOver) tiles.push({label: "Overdrawn",
+                             value: fmtU(firstOver.balance) + " " + unitSuffix(),
+                             note: "period of " + fmtDate(firstOver.date), bad: true});
+  $("tiles").innerHTML = tiles.map(t =>
+    `<div class="tile"><div class="label">${t.label}</div>` +
+    `<div class="value${t.bad ? " bad" : ""}">${t.value}</div>` +
+    `<div class="note">${t.note}</div></div>`).join("");
+  const balVal = $("tiles").children[0].querySelector(".value");
+  balVal.classList.add("editable");
+  balVal.title = "Click to edit the current balance";
+  balVal.addEventListener("click", () => editBalance(balVal, current.balance));
+}
+
+function editBalance(div, current) {
+  if (div.querySelector("input")) return;
+  div.classList.remove("editable");
+  // period Sundays on the accrual grid, most recent first, back ~1 year
+  const latest = [...STATE.projection].filter(r => r.date <= STATE.today).pop();
+  const sundays = [];
+  const d = parseISO(latest ? latest.date : STATE.anchor);
+  for (let i = 0; i < 27; i++) {
+    sundays.push(iso(d));
+    d.setUTCDate(d.getUTCDate() - 14);
+  }
+  const opts = sundays.map((s, i) =>
+      `<option value="${s}"${i === 0 ? " selected" : ""}>as of ${fmtDate(s)}</option>`).join("");
+  div.innerHTML = `<input type="number" step="0.01" min="-320" max="320"
+                    value="${current}"> h<br>
+                   <select style="font-size:13px;font-weight:400;margin-top:4px">${opts}</select>`;
+  const inp = div.querySelector("input");
+  const sel = div.querySelector("select");
+  inp.focus(); inp.select();
+  let done = false;
+  const commit = async () => {
+    if (done) return;
+    done = true;
+    const v = parseFloat(inp.value);
+    if (isNaN(v)) { renderTiles(); return; }
+    const out = await post("/api/anchor", {balance: v, date: sel.value});
+    if (out && out.ok) await refresh(); else renderTiles();
+  };
+  inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") commit();
+    if (e.key === "Escape") { done = true; renderTiles(); }
+  });
+  sel.addEventListener("keydown", e => {
+    if (e.key === "Enter") commit();
+    if (e.key === "Escape") { done = true; renderTiles(); }
+  });
+  div.addEventListener("focusout", e => {
+    if (!div.contains(e.relatedTarget)) commit();
+  });
+}
+
+/* ------------------------------------------------ calendar */
+function renderCalendar() {
+  const label = new Date(Date.UTC(viewYear, viewMonth, 1))
+      .toLocaleDateString("en-US", {timeZone:"UTC", month: "long", year: "numeric"});
+  $("monthLabel").textContent = label;
+
+  const first = new Date(Date.UTC(viewYear, viewMonth, 1));
+  const start = new Date(first);
+  start.setUTCDate(1 - first.getUTCDay());          // back to Sunday
+  const cells = [];
+  const d = new Date(start);
+  for (let i = 0; i < 42; i++) {
+    const ds = iso(d);
+    const inMonth = d.getUTCMonth() === viewMonth;
+    const cls = ["day"];
+    if (!inMonth) cls.push("out");
+    if (((periodIndex(ds) % 2) + 2) % 2 === 1) cls.push("altperiod");
+    if (STATE.holidays[ds]) cls.push("holiday");
+    if (ds === STATE.today) cls.push("today");
+    if (ds < STATE.today) cls.push("past");
+    if (selection.has(ds)) cls.push("selected");
+    let inner = `<span class="num">${d.getUTCDate()}</span>`;
+    const e = STATE.entries[ds];
+    if (e && e.b > 0)
+      inner += `<span class="pto b" title="PTOB">${fmtU(e.b)}${unitSuffix()}</span>`;
+    if (e && e.nr > 0)
+      inner += `<span class="pto nr" title="Parental leave">${fmtU(e.nr)}${unitSuffix()}</span>`;
+    if (e && e.label) inner += `<span class="lbl" title="${esc(e.label)}">${esc(e.label)}</span>`;
+    if (STATE.holidays[ds])
+      inner += `<span class="holname">${esc(STATE.holidays[ds].name)}</span>`;
+    const row = STATE.projByDate[ds];
+    if (row) {
+      const od = row.overdrawn ? " overdrawn" : "";
+      inner += `<span class="accr${od}">bal <b>${fmtU(row.balance)}</b></span>`;
+    }
+    cells.push(`<div class="${cls.join(" ")}" data-date="${ds}">${inner}</div>`);
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  $("calGrid").innerHTML = cells.join("");
+  for (const el of $("calGrid").children) {
+    el.addEventListener("pointerdown", e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      lastPointerType = e.pointerType;
+      const ds = el.dataset.date;
+      if (touchRange.active) {             // second tap completes the range
+        selectRange(touchRange.anchor, ds);
+        touchRange.active = false;
+        $("rangeHint").style.display = "none";
+        updateSelectionClasses();
+        dragging = true;                   // pointerup opens the editor
+        return;
+      }
+      dragging = true; dragMoved = false;
+      dragAnchor = ds;
+      selection = new Set([ds]);
+      updateSelectionClasses();
+      if (e.pointerType === "touch") {     // long-press starts range mode
+        clearTimeout(longPressTimer);
+        longPressTimer = setTimeout(() => {
+          touchRange = {active: true, anchor: ds};
+          suppressOpen = true;
+          $("rangeHint").style.display = "block";
+          if (navigator.vibrate) navigator.vibrate(15);
+        }, 450);
+      }
+    });
+    el.addEventListener("pointerenter", () => {
+      if (!dragging || el.dataset.date === dragAnchor) return;
+      dragMoved = true;
+      selectRange(dragAnchor, el.dataset.date);
+      updateSelectionClasses();
+    });
+  }
+}
+
+function updateSelectionClasses() {
+  for (const el of $("calGrid").children)
+    el.classList.toggle("selected", selection.has(el.dataset.date));
+}
+
+function selectRange(a, b) {
+  if (b < a) [a, b] = [b, a];
+  selection = new Set();
+  const d = parseISO(a), end = parseISO(b);
+  while (d <= end) { selection.add(iso(d)); d.setUTCDate(d.getUTCDate() + 1); }
+}
+
+function openEditor() {
+  const dates = [...selection].sort();
+  if (!dates.length) return;
+  $("editor").style.display = "";
+  if (dates.length === 1) {
+    $("edDate").textContent = fmtDate(dates[0]);
+    const hol = STATE.holidays[dates[0]];
+    $("edHolInfo").textContent = hol ? "Holiday: " + hol.name : "";
+  } else {
+    $("edDate").textContent = dates.length + " days: " +
+        fmtDate(dates[0]) + " – " + fmtDate(dates[dates.length - 1]);
+    const hols = dates.filter(d => STATE.holidays[d]).length;
+    $("edHolInfo").textContent = hols ? hols + " holiday(s) in range" : "";
+  }
+  const existingB = new Set(dates.map(d => entryB(d)));
+  const existingNR = new Set(dates.map(d => entryNR(d)));
+  const uniform = existingB.size === 1 && [...existingB][0] > 0 ? [...existingB][0]
+                : existingNR.size === 1 && [...existingNR][0] > 0 ? [...existingNR][0]
+                : 0;
+  $("edHours").value = uniform > 0 ? uniform : 8;   // default to a full day
+  const existingL = new Set(dates.map(d => (STATE.entries[d] || {}).label || ""));
+  $("edLabel").value = existingL.size === 1 ? [...existingL][0] : "";
+  $("edErr").textContent = "";
+  // focusing the input pops up the keyboard on touch devices — skip it there
+  if (lastPointerType !== "touch") $("edLabel").focus();
+}
+
+function datesToSave(addingContent) {
+  let dates = [...selection].sort();
+  let holSkipped = 0;
+  if (addingContent) {   // PTO/labels never land on weekends or holidays
+    dates = dates.filter(d => !isWeekend(d));
+    const n = dates.length;
+    dates = dates.filter(d => !STATE.holidays[d]);
+    holSkipped = n - dates.length;
+  }
+  return {dates, holSkipped};
+}
+
+async function saveLeave(leaveType) {
+  const hours = parseFloat($("edHours").value) || 0;
+  const label = $("edLabel").value.trim();
+  const {dates, holSkipped} = datesToSave(hours > 0 || label);
+  if (!dates.length) {
+    $("edErr").textContent =
+        "Weekends and holidays never receive leave — nothing to save.";
+    return;
+  }
+  if (leaveType === "NR" && hours > 0 && hours !== Math.round(hours)) {
+    $("edErr").textContent = "Parental leave is taken in 1-hour increments.";
+    return;
+  }
+  const out = await post("/api/entry", {dates, hours, label, leaveType});
+  if (!out) return;
+  if (!out.ok) { $("edErr").textContent = out.error || "Save failed."; return; }
+  const notes = [];
+  if (holSkipped) notes.push(holSkipped + " holiday(s) skipped");
+  if (out.windowSkipped && out.windowSkipped.length)
+    notes.push(out.windowSkipped.length + " day(s) outside the parental window skipped");
+  if (out.unfilled)
+    notes.push(out.unfilled + " day(s) left unfilled — parental leave exhausted");
+  if (out.clamped)
+    notes.push(out.clamped + " day(s) reduced to fit the 8 h/day limit");
+  if (out.fullSkipped)
+    notes.push(out.fullSkipped + " day(s) already at 8 h skipped");
+  if (out.skipped && out.skipped.length)
+    notes.push(out.skipped.length + " day(s) on/before the anchor date skipped");
+  // informational notes stay quiet on small screens; real errors still show
+  $("edErr").textContent =
+      window.matchMedia("(max-width: 700px)").matches ? "" : notes.join("; ");
+  await refresh();
+}
+
+async function clearDays() {
+  const dates = [...selection].sort();
+  if (!dates.length) return;
+  $("edLabel").value = "";
+  const out = await post("/api/entry", {dates, hours: 0, label: "", clear: true});
+  if (!out) return;
+  if (!out.ok) { $("edErr").textContent = out.error || "Clear failed."; return; }
+  $("edErr").textContent = "";
+  await refresh();
+}
+
+async function setHoliday(remove) {
+  const dates = [...selection].sort();
+  if (!dates.length) return;
+  const out = await post("/api/holiday",
+      {dates, name: $("edLabel").value.trim(), remove});
+  if (!out) return;
+  if (!out.ok) { $("edErr").textContent = out.error || "Save failed."; return; }
+  $("edErr").textContent = "";
+  await refresh();
+  openEditor();
+}
+
+/* ------------------------------------------------ line chart */
+function periodLabels(row) {
+  const end = parseISO(row.date);
+  const start = new Date(end); start.setUTCDate(start.getUTCDate() - 13);
+  const s0 = iso(start), s1 = row.date;
+  const groups = {};
+  for (const [d, e] of Object.entries(STATE.entries)) {
+    const h = (e.b || 0) + (e.nr || 0);
+    if (d >= s0 && d <= s1 && h > 0 && e.label)
+      groups[e.label] = (groups[e.label] || 0) + h;
+  }
+  return Object.entries(groups);
+}
+
+function renderChart() {
+  const svg = $("chart");
+  const box = $("chartbox");
+  const isNarrow = window.matchMedia("(max-width: 700px)").matches;
+  const isCoarse = window.matchMedia("(pointer: coarse)").matches;
+  const W = box.clientWidth || 700, H = isNarrow ? 260 : 340;
+  const tapR = isCoarse ? 16 : 11;
+  const M = {top: 22, right: 76, bottom: 30, left: 48};
+  svg.setAttribute("height", H);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+  const horizonMonths = +$("horizon").value;
+  const endD = parseISO(STATE.today);
+  endD.setUTCMonth(endD.getUTCMonth() + horizonMonths);
+  const rows = STATE.projection.filter(r => r.date <= iso(endD));
+  if (rows.length < 2) { svg.innerHTML = ""; return; }
+
+  const t0 = parseISO(rows[0].date).getTime();
+  const t1 = parseISO(rows[rows.length - 1].date).getTime();
+  // data sits to the right of the y-axis: inset the plot area
+  const plotL = M.left + 14, plotR = W - M.right;
+  const minBal = Math.min(0, ...rows.map(r => r.balance));
+  const yMin = Math.min(0, Math.floor(minBal / 60) * 60);
+  const maxCap = Math.max(...rows.map(r => r.cap || 240));
+  // if the parental window overlaps the horizon, make room for 480 h
+  const parentalVisible = STATE.birthDate &&
+      STATE.birthDate <= rows[rows.length - 1].date &&
+      STATE.parentalExpiry >= rows[0].date;
+  const yMax = (parentalVisible ? Math.max(maxCap, STATE.parentalTotal) : maxCap) + 10;
+  const x = t => plotL + (t - t0) / (t1 - t0) * (plotR - plotL);
+  const y = v => M.top + (yMax - v) / (yMax - yMin) * (H - M.top - M.bottom);
+  const axisU = v => Math.round(cv(v) * 100) / 100;
+
+  let s = "";
+  for (let v = yMin; v <= yMax - 10; v += 60) {
+    s += `<line x1="${M.left}" x2="${W - M.right}" y1="${y(v)}" y2="${y(v)}"
+           stroke="var(--grid)" stroke-width="1"/>`;
+    s += `<text x="${M.left - 8}" y="${y(v) + 4}" text-anchor="end">${axisU(v)}</text>`;
+  }
+  // cap line (dashed; steps up when the 9-year rate/cap bump lands)
+  let capD = `M ${M.left} ${y(rows[0].cap || 240)}`;
+  for (let i = 1; i < rows.length; i++) {
+    if ((rows[i].cap || 240) !== (rows[i - 1].cap || 240)) {
+      const xs = x(parseISO(rows[i].date).getTime());
+      capD += ` H ${xs} V ${y(rows[i].cap || 240)}`;
+    }
+  }
+  capD += ` H ${W - M.right}`;
+  s += `<path d="${capD}" fill="none" stroke="var(--axis)"
+         stroke-width="1.5" stroke-dasharray="5 4"/>`;
+  // x ticks: true month boundaries (the 1st), evenly thinned to the width.
+  // The year is attached to the first rendered label of each new year, so
+  // the rollover stays visible no matter which months survive thinning.
+  const months = [];
+  {
+    const d = parseISO(rows[0].date);
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + 1);        // first 1st-of-month in range
+    while (d.getTime() <= t1) {
+      months.push(new Date(d));
+      d.setUTCMonth(d.getUTCMonth() + 1);
+    }
+  }
+  const maxLabels = Math.max(4, Math.floor((plotR - plotL) / 46));
+  const step = Math.ceil(months.length / maxLabels);
+  let prevYear = null, lastTickX = -Infinity;
+  months.forEach((dt, i) => {
+    if (i % step) return;
+    const px = x(dt.getTime());
+    if (px - lastTickX < 40) return;      // safety net; rare with even ticks
+    lastTickX = px;
+    const yr = dt.getUTCFullYear();
+    const lbl = dt.toLocaleDateString("en-US", {timeZone:"UTC", month: "short"}) +
+        (yr !== prevYear ? " '" + String(yr).slice(2) : "");
+    prevYear = yr;
+    s += `<line x1="${px}" x2="${px}" y1="${H - M.bottom}" y2="${H - M.bottom + 4}"
+           stroke="var(--axis)" stroke-width="1"/>`;
+    s += `<text x="${px}" y="${H - 8}" text-anchor="middle">${lbl}</text>`;
+  });
+  s += `<line x1="${M.left}" x2="${W - M.right}" y1="${y(0)}" y2="${y(0)}"
+         stroke="var(--axis)" stroke-width="1"/>`;
+  s += `<line x1="${M.left}" x2="${M.left}" y1="${M.top}" y2="${H - M.bottom}"
+         stroke="var(--axis)" stroke-width="1"/>`;
+  const tNow = parseISO(STATE.today).getTime();
+  if (tNow >= t0 && tNow <= t1) {
+    s += `<line x1="${x(tNow)}" x2="${x(tNow)}" y1="${M.top}" y2="${H - M.bottom}"
+           stroke="var(--axis)" stroke-width="1" stroke-dasharray="2 3"/>`;
+    s += `<text x="${x(tNow)}" y="${M.top - 6}" text-anchor="middle">today</text>`;
+  }
+  // parental leave line (pink): from birth, down as taken, dead at +1 year
+  if (parentalVisible) {
+    const bT = parseISO(STATE.birthDate).getTime();
+    const eT = parseISO(STATE.parentalExpiry).getTime();
+    const seg = [];
+    const startT = Math.max(bT, t0);
+    seg.push([x(startT), y(nrRemainingAt(iso(new Date(startT))))]);
+    for (const r of rows) {
+      const rT = parseISO(r.date).getTime();
+      if (rT > startT && rT < Math.min(eT, t1) && r.nrRemaining !== null)
+        seg.push([x(rT), y(r.nrRemaining)]);
+    }
+    const endT = Math.min(eT, t1);
+    const endVal = nrRemainingAt(iso(new Date(endT - 86400000)));
+    seg.push([x(endT), y(Math.max(0, endVal ?? 0))]);
+    s += `<polyline fill="none" stroke="var(--leave-nr)" stroke-width="2"
+           stroke-linejoin="round" points="${seg.map(p => p.join(",")).join(" ")}"/>`;
+    if (eT <= t1) {
+      // expiry: red dotted line where the remaining balance becomes zero
+      s += `<line x1="${x(eT)}" x2="${x(eT)}" y1="${M.top}" y2="${H - M.bottom}"
+             stroke="var(--critical)" stroke-width="1.5" stroke-dasharray="2 4"/>`;
+    }
+  }
+  // PTOB series line (green)
+  const pts = rows.map(r => [x(parseISO(r.date).getTime()), y(r.balance)]);
+  s += `<polyline fill="none" stroke="var(--leave-b)" stroke-width="2"
+         stroke-linejoin="round" points="${pts.map(p => p.join(",")).join(" ")}"/>`;
+  s += `<line id="xhair" x1="0" x2="0" y1="${M.top}" y2="${H - M.bottom}"
+         stroke="var(--muted)" stroke-width="1" visibility="hidden"/>`;
+  rows.forEach((r, i) => {
+    const [px, py] = pts[i];
+    const c = r.overdrawn ? "var(--critical)" : "var(--leave-b)";
+    s += `<circle cx="${px}" cy="${py}" r="3" fill="${c}"
+           stroke="var(--surface)" stroke-width="2"/>`;
+    s += `<circle cx="${px}" cy="${py}" r="${tapR}" fill="transparent"
+           data-i="${i}" class="hover-target"/>`;
+  });
+  // pink line points: same hover/click behavior as the green line
+  if (parentalVisible) {
+    rows.forEach((r, i) => {
+      if (r.nrRemaining === null || r.nrRemaining === undefined) return;
+      if (r.date < STATE.birthDate || r.date >= STATE.parentalExpiry) return;
+      const px = x(parseISO(r.date).getTime()), py = y(r.nrRemaining);
+      s += `<circle cx="${px}" cy="${py}" r="3" fill="var(--leave-nr)"
+             stroke="var(--surface)" stroke-width="2"/>`;
+      s += `<circle cx="${px}" cy="${py}" r="${tapR}" fill="transparent"
+             data-i="${i}" class="hover-target"/>`;
+    });
+  }
+  const last = rows[rows.length - 1];
+  s += `<text class="dlabel" fill="var(--leave-b)" x="${pts[pts.length - 1][0] + 6}"
+         y="${pts[pts.length - 1][1] + 4}">${fmtU(last.balance)}</text>`;
+  svg.innerHTML = s;
+
+  const tip = $("tooltip");
+  const xhair = svg.querySelector("#xhair");
+  for (const el of svg.querySelectorAll(".hover-target")) {
+    el.addEventListener("mouseenter", () => {
+      const r = rows[+el.dataset.i];
+      const px = pts[+el.dataset.i][0];
+      xhair.setAttribute("x1", px); xhair.setAttribute("x2", px);
+      xhair.setAttribute("visibility", "visible");
+      let html = `<div class="t-date">${fmtDate(r.date)}</div>` +
+                 `<div class="t-bal">${fmtU(r.balance)} ${unitSuffix()}</div>`;
+      if (r.accrued) html += `<div class="t-line">+${fmtU(r.accrued)} ${unitSuffix()} accrued</div>`;
+      if (r.used)    html += `<div class="t-line">&minus;${fmtU(r.used)} ${unitSuffix()} PTOB used</div>`;
+      if (r.nrUsed)  html += `<div class="t-line nr">&minus;${fmtU(r.nrUsed)} ${unitSuffix()} parental used</div>`;
+      if (r.nrRemaining !== null && r.nrRemaining !== undefined)
+        html += `<div class="t-line nr">parental left: ${fmtU(r.nrRemaining)} ${unitSuffix()}</div>`;
+      for (const [lbl, h] of periodLabels(r))
+        html += `<div class="t-line">&bull; ${esc(lbl)}: ${fmtU(h)} ${unitSuffix()}</div>`;
+      if (r.lost)    html += `<div class="t-line lost">&#9888; ${fmtU(r.lost)} ${unitSuffix()} lost to cap</div>`;
+      if (r.overdrawn) html += `<div class="t-line od">&#9888; overdrawn</div>`;
+      tip.innerHTML = html;
+      tip.style.display = "block";
+      const bw = box.clientWidth;
+      const anchorY = +el.getAttribute("cy");   // hovered point (green or pink)
+      tip.style.left = Math.min(px + 14, bw - tip.offsetWidth - 4) + "px";
+      tip.style.top = Math.max(anchorY - tip.offsetHeight - 12, 0) + "px";
+    });
+    el.addEventListener("mouseleave", () => {
+      tip.style.display = "none";
+      xhair.setAttribute("visibility", "hidden");
+    });
+    el.addEventListener("click", () => {
+      // jump the calendar to this period Sunday
+      const r = rows[+el.dataset.i];
+      const dt = parseISO(r.date);
+      viewYear = dt.getUTCFullYear();
+      viewMonth = dt.getUTCMonth();
+      selection = new Set([r.date]);
+      renderCalendar();
+    });
+  }
+}
+
+/* ------------------------------------------------ wiring */
+function renderHire() {
+  $("hireDate").value = STATE.hireDate;
+  $("birthDate").value = STATE.birthDate || "";
+  let info = "9-year mark " + fmtDate(STATE.nineYearDate) +
+      ": accrual 6.7692 → 8.000 h/period, cap 240 → 320 h";
+  info += STATE.birthDate
+      ? " · parental leave: 480 h from " + fmtDate(STATE.birthDate) +
+        " until " + fmtDate(STATE.parentalExpiry)
+      : " · set a birth date to enable parental leave";
+  $("hireInfo").textContent = info;
+}
+
+async function refresh() {
+  fetchState();
+  renderTiles();
+  renderCalendar();
+  renderChart();
+  renderHire();
+}
+
+document.addEventListener("pointerup", () => {
+  clearTimeout(longPressTimer);
+  if (!dragging) return;
+  dragging = false;
+  if (suppressOpen) { suppressOpen = false; return; }
+  openEditor();
+});
+document.addEventListener("pointercancel", () => {
+  clearTimeout(longPressTimer);
+  dragging = false;
+});
+$("calGrid").addEventListener("contextmenu", e => {
+  if (lastPointerType === "touch") e.preventDefault();
+});
+window.addEventListener("resize", () => STATE && renderChart());
+$("horizon").addEventListener("change", () => { renderTiles(); renderChart(); });
+$("prev").addEventListener("click", () => {
+  viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; } renderCalendar();
+});
+$("next").addEventListener("click", () => {
+  viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++; } renderCalendar();
+});
+$("todayBtn").addEventListener("click", () => {
+  const t = parseISO(STATE.today);
+  viewYear = t.getUTCFullYear(); viewMonth = t.getUTCMonth(); renderCalendar();
+});
+$("edSaveB").addEventListener("click", () => saveLeave("B"));
+$("edSaveNR").addEventListener("click", () => saveLeave("NR"));
+$("edClear").addEventListener("click", clearDays);
+$("edHours").addEventListener("keydown", e => {
+  if (e.key === "Enter") saveLeave("B");
+});
+$("edLabel").addEventListener("keydown", e => {
+  if (e.key === "Enter") saveLeave("B");
+});
+$("edHoliday").addEventListener("click", () => setHoliday(false));
+$("edUnholiday").addEventListener("click", () => setHoliday(true));
+$("themeBtn").addEventListener("click", () => {
+  const cur = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = cur;
+  localStorage.setItem("ptoTheme", cur);
+});
+function updateUnitsBtn() {
+  $("unitsBtn").textContent = UNITS === "h" ? "Units: hours" : "Units: days";
+}
+$("unitsBtn").addEventListener("click", () => {
+  UNITS = UNITS === "h" ? "d" : "h";
+  localStorage.setItem("ptoUnits", UNITS);
+  updateUnitsBtn();
+  renderTiles(); renderCalendar(); renderChart();
+});
+updateUnitsBtn();
+$("backupBtn").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(loadData(), null, 2)],
+                        {type: "application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "leave_data_backup.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+$("restoreBtn").addEventListener("click", () => $("restoreFile").click());
+$("restoreFile").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const data = normalizeData(JSON.parse(await file.text()));
+    saveData(data);
+    await refresh();
+  } catch (err) {
+    alert("Could not read that backup file: " + err.message);
+  }
+  e.target.value = "";
+});
+
+$("hireDate").addEventListener("change", async () => {
+  const v = $("hireDate").value;
+  if (!v) { renderHire(); return; }
+  const out = await post("/api/hiredate", {date: v});
+  if (out && out.ok) await refresh(); else renderHire();
+});
+$("birthDate").addEventListener("change", async () => {
+  const out = await post("/api/birthdate", {date: $("birthDate").value});
+  if (out && out.ok) await refresh(); else renderHire();
+});
+$("birthClear").addEventListener("click", async () => {
+  const out = await post("/api/birthdate", {date: ""});
+  if (out && out.ok) await refresh();
+});
+
+(() => {
+  fetchState();
+  const t = parseISO(STATE.today);
+  viewYear = t.getUTCFullYear(); viewMonth = t.getUTCMonth();
+  renderTiles(); renderCalendar(); renderChart(); renderHire();
+})();
+</script>
+</body>
+</html>
