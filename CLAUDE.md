@@ -5,17 +5,25 @@ GitHub Pages deployment of index.html; never commit pto_data.json /
 leave_data.json / backups, they're gitignored because they encode the
 user's leave plan and child's birth date). Pull before working, push after.
 
-Personal leave-planning app for mfuson (MITRE). Two interchangeable builds
-kept in feature parity — **every change must be applied to BOTH**:
+Personal leave-planning app for mfuson (MITRE). **One build** as of
+2026-08-19:
 
-- `leave_planner.py` — Python 3 stdlib-only local web app (serves the same UI
-  at http://localhost:8765; the entire HTML/JS page is the `PAGE` string
-  inside the file). Data: `leave_data.json` next to the script.
-- `leave_planner.html` — pure HTML/JS single file, same UI/logic, data in
-  browser localStorage (key `leavePlannerData`). This file is also deployed
-  as `index.html` on the user's GitHub Pages site (they commit it manually;
-  each commit auto-redeploys). `index.html` in this folder is the
-  ready-to-upload copy — keep it synced after changes.
+- `leave_planner.html` — pure HTML/JS single file. Data in browser
+  localStorage (key `leavePlannerData`), migrating to a Google Sheets
+  backend. Deployed as `index.html` on the user's GitHub Pages site (each
+  commit auto-redeploys). `index.html` is a byte-identical copy — keep the
+  two in sync after every change (`md5sum index.html leave_planner.html`).
+- `leave_planner.py` (Python local server) was **retired**; it is in git
+  history if ever needed. The old "keep both builds in parity" rule is gone.
+
+## Tests
+
+`node test/calc.test.js` — characterization tests for the calc engine.
+`test/engine.js` extracts the engine straight out of `index.html` and runs it
+under node, so the tests always exercise the shipped code. A golden
+projection fixture lives in `test/fixtures/`; regenerate deliberately with
+`UPDATE_FIXTURES=1 node test/calc.test.js` and review the diff. **Run these
+before and after any change to the math or the storage layer.**
 
 Version 1.0 ("PTOB-Planner", single leave type) is archived in
 `PTOB-Planner-1.0\` and `PTOB-Planner-1.0.zip` (also in Documents). Both v2
@@ -87,17 +95,16 @@ Shared:
   (Confirmed pattern: they once gave their 9-year anniversary when asked
   for a "hire date".)
 - Iterate and verify in the browser; don't stop at the literal request.
-- Keep both builds in parity and refresh the archives after changes.
+- Keep `index.html` and `leave_planner.html` byte-identical, and refresh the
+  archives after changes.
 
 ## Gotchas
 
-- The Python page is a raw string `PAGE` — edit it like HTML/JS, and keep
-  it byte-similar to leave_planner.html where logic overlaps.
 - Browser-pane testing: the user often has the app open live (their edits
   appear mid-session); file:// pages in the preview pane sometimes keep a
   stale JS context — trust live localStorage reads over in-memory STATE,
   and snapshot/restore localStorage around destructive tests.
-- `python` on this machine: Python 3.12 at
-  %LOCALAPPDATA%\Programs\Python\Python312 (installed via winget).
-- Tests for the calc engine live in the session scratchpad (throwaway);
-  re-derive from the rules above when needed.
+- The calc engine sits between the `calc engine` and `UI` banner comments in
+  the `<script>` block. `test/engine.js` finds it by those markers and by the
+  names of five date helpers declared just below the UI banner — renaming a
+  marker or a helper breaks extraction loudly, which is intended.

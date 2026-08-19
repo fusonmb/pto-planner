@@ -18,14 +18,15 @@ Leave types:
 Neither type can be placed on weekends or company holidays (built in
 through 2030 from the MITRE pay calendars).
 
-Two interchangeable versions:
+One version:
 
-1) leave_planner.py  — Python version (recommended)
-   Run:  python leave_planner.py       (or double-click "Leave Planner.bat")
-   Opens http://localhost:8765.  Data: leave_data.json next to the script
-   (migrates 1.0's pto_data.json automatically on first run).
+  leave_planner.html — pure HTML/JavaScript, no dependencies.  Double-click
+  it, or use the deployed copy at https://fusonmb.github.io/pto-planner/
+  (index.html is the same file).  Data lives in the browser (localStorage;
+  migrates the 1.0 planner's saved data automatically).  "Backup data" /
+  "Restore" move data between devices.
 
-2) leave_planner.html — pure HTML/JavaScript version (no Python needed)
-   Double-click; runs entirely in the browser.  Data lives in the browser
-   (localStorage; migrates the 1.0 planner's saved data automatically).
-   Use "Backup data" / "Restore" to move data between devices/versions.
+  The Python version (leave_planner.py, "Leave Planner.bat") was retired on
+  2026-08-19 — it is in git history if it is ever wanted again.  The HTML
+  build is now the only one, and is moving to a Google Sheets backend so the
+  plan follows the user across devices instead of living in one browser.
