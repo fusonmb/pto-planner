@@ -8,17 +8,28 @@ user's leave plan and child's birth date). Pull before working, push after.
 Personal leave-planning app for mfuson (MITRE). **One build** as of
 2026-08-19:
 
-- `leave_planner.html` — pure HTML/JS single file. Data in browser
-  localStorage (key `leavePlannerData`), migrating to a Google Sheets
-  backend. Deployed as `index.html` on the user's GitHub Pages site (each
-  commit auto-redeploys). `index.html` is a byte-identical copy — keep the
-  two in sync after every change (`md5sum index.html leave_planner.html`).
+- `leave_planner.html` — pure HTML/JS single file. Deployed as `index.html`
+  on the user's GitHub Pages site (each commit auto-redeploys). `index.html`
+  is a byte-identical copy — keep the two in sync after every change
+  (`md5sum index.html leave_planner.html`).
+- `sheets-store.js` — Google Sheets storage. Hydrates a cache once, then
+  serves `loadData()` synchronously and flushes writes to the Sheet behind
+  the UI, so the calc engine stays synchronous. localStorage is written on
+  every save and is the fallback when the Sheet is unreachable or absent.
+- `config.js` — client ID + API key (see `config.example.js`). **Must be
+  committed** — Pages only serves what's in the repo, and both values are
+  public by design. Without it the app silently stays on localStorage.
+- `apps-script/Code.gs` — lives in the Sheet. Builds the tabs and refreshes
+  the read-only Dashboard. Contains a second copy of the accrual walk;
+  `test/codegs.test.js` forces the two to agree.
+- `docs/HANDOFF.md` — the migration's design record and remaining work.
 - `leave_planner.py` (Python local server) was **retired**; it is in git
   history if ever needed. The old "keep both builds in parity" rule is gone.
 
 ## Tests
 
-`node test/calc.test.js` — characterization tests for the calc engine.
+`node test/run.js` — all three suites (52 tests). Individually:
+`calc.test.js` — characterization tests for the calc engine.
 `test/engine.js` extracts the engine straight out of `index.html` and runs it
 under node, so the tests always exercise the shipped code. A golden
 projection fixture lives in `test/fixtures/`; regenerate deliberately with
@@ -97,6 +108,21 @@ Shared:
 - Iterate and verify in the browser; don't stop at the literal request.
 - Keep `index.html` and `leave_planner.html` byte-identical, and refresh the
   archives after changes.
+
+## Google Sheets backend
+
+- The Sheet is **editable by hand**, so the parse path is a real input, not
+  just a mirror: duplicate rows for one day, numbers typed as text, and
+  malformed rows all have to survive `hydrate()`.
+- Leave is **one row per day** with a column per active type — not a tab per
+  type. The label is shared per day and the 8 h limit is the combined total,
+  and neither survives being split across tabs.
+- Sheets API writes do NOT fire `onEdit`, so nothing in `Code.gs` runs when
+  the app saves. The Dashboard refreshes on open and daily.
+- `Config` needs `anchorBalance` as well as `anchorSunday`; an anchor date
+  with no balance is ignored rather than seeded at zero.
+- Drive permissions are the whole permission model. `readOnlyBlock()` gates
+  all five mutating entry points so a Viewer cannot write through any path.
 
 ## Gotchas
 

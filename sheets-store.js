@@ -104,7 +104,10 @@ var LeaveStore = (function () {
     opts = opts || {};
     return new Promise(function (resolve, reject) {
       if (!tokenClient && !initAuth()) {
-        reject(new Error("Google sign-in is not configured."));
+        // distinguish "no credentials" from "the Google library never loaded"
+        reject(new Error(configured()
+          ? "Google sign-in did not load — check your connection and reload."
+          : "Google sign-in is not configured."));
         return;
       }
       tokenClient.callback = function (resp) {

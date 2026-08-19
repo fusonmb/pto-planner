@@ -165,6 +165,19 @@
   svg .dlabel { fill: var(--ink-2); font-weight: 600; }
   svg .hover-target { cursor: pointer; }
 
+  /* ---- Google Sheets sync bar ---- */
+  /* a class-level `display` beats the UA sheet's [hidden] rule, so restore it */
+  .syncbar[hidden] { display: none; }
+  .syncbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 0 0 12px; padding: 8px 12px; border-radius: 8px;
+    background: var(--card); border: 1px solid var(--line);
+    font-size: 13px; }
+  .syncbar.err  { border-color: #c0392b; }
+  .syncbar.ro   { border-color: #d68910; }
+  .syncbar #syncMsg { flex: 1 1 auto; }
+  .syncbar button { font-size: 12px; padding: 4px 10px; }
+  @media (max-width: 700px) { .syncbar { font-size: 12px; } }
+
   /* ---- hire-date footer ---- */
   .foot { margin-top: 16px; display: flex; gap: 12px; align-items: center;
           flex-wrap: wrap; font-size: 13px; }
@@ -209,6 +222,12 @@
 </style>
 </head>
 <body>
+<!-- Google Identity Services and Picker.  Both are optional: without
+     config.js the page never calls them and stays on localStorage. -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
+<script src="sheets-store.js"></script>
+<script src="config.js" onerror="window.__noSheetConfig = true"></script>
 <div class="wrap">
   <div class="titlebar">
     <h1>Leave Planner</h1>
@@ -218,6 +237,12 @@
     <button id="backupBtn" title="Download your data as a JSON file">Backup data</button>
     <button id="restoreBtn" title="Load data from a backup JSON file">Restore</button>
     <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+    <button id="syncBtn" title="Connect this planner to your Google Sheet"
+            hidden>Google Sheets</button>
+  </div>
+  <div id="syncBar" class="syncbar" hidden><span id="syncMsg"></span>
+    <button id="syncPick" title="Select a Sheet shared with you">Pick a Sheet</button>
+    <button id="syncOff" title="Work from this browser only">Disconnect</button>
   </div>
   <p class="sub"><b style="color:var(--leave-b)">PTOB (B), green</b>:
      6.7692 h accrue every two weeks, 8.000 h after nine years
@@ -389,7 +414,15 @@ function normalizeData(raw) {
   return data;
 }
 
+/* Storage indirection.  When sheets-store.js is present the Google Sheet is
+   the source of truth and localStorage is its offline mirror; without it
+   (file:// with no config, and the node test harness) this falls back to the
+   original localStorage-only behaviour.  The engine stays synchronous either
+   way -- the Sheet write trails behind the save. */
+const STORE = typeof LeaveStore !== "undefined" ? LeaveStore : null;
+
 function loadData() {
+  if (STORE && STORE.isSheet()) return normalizeData(STORE.read());
   try {
     const raw = localStorage.getItem(STORE_KEY) ||
                 localStorage.getItem(LEGACY_STORE_KEY);   // migrate from 1.0
@@ -400,7 +433,19 @@ function loadData() {
 }
 
 function saveData(data) {
+  if (STORE) { STORE.write(data); return; }
   localStorage.setItem(STORE_KEY, JSON.stringify(data));
+}
+
+/* Refuse every mutation while connected to a Sheet we may only read.  This
+   backs up the disabled controls: Drive permissions are the permission
+   model, so a Viewer must not be able to write through any path. */
+function readOnlyBlock() {
+  if (STORE && STORE.isSheet() && !STORE.canEdit()) {
+    return {ok: false, error: "This Sheet is shared with you as a Viewer — "
+                              + "ask for edit access to make changes."};
+  }
+  return null;
 }
 
 function effectiveAnchor(data) {
@@ -514,6 +559,7 @@ function buildState() {
 
 /* --------- local equivalents of the old server endpoints --------- */
 function applyEntry({dates, hours, label, leaveType, clear}) {
+  { const ro = readOnlyBlock(); if (ro) return ro; }
   const leave = (leaveType || "B").toUpperCase();
   if (leave !== "B" && leave !== "NR")
     return {ok: false, error: "Unknown leave type."};
@@ -594,6 +640,7 @@ function applyEntry({dates, hours, label, leaveType, clear}) {
 }
 
 function applyBirthDate({date: when}) {
+  { const ro = readOnlyBlock(); if (ro) return ro; }
   if (when && !/^\d{4}-\d{2}-\d{2}$/.test(when))
     return {ok: false, error: "Bad date."};
   const data = loadData();
@@ -603,6 +650,7 @@ function applyBirthDate({date: when}) {
 }
 
 function applyHoliday({dates, name, remove}) {
+  { const ro = readOnlyBlock(); if (ro) return ro; }
   const data = loadData();
   for (const d of dates) {
     if (remove) {
@@ -619,6 +667,7 @@ function applyHoliday({dates, name, remove}) {
 }
 
 function applyHireDate({date: when}) {
+  { const ro = readOnlyBlock(); if (ro) return ro; }
   if (!when || !/^\d{4}-\d{2}-\d{2}$/.test(when))
     return {ok: false, error: "Bad date."};
   const data = loadData();
@@ -628,6 +677,7 @@ function applyHireDate({date: when}) {
 }
 
 function applyAnchor({balance, date: when}) {
+  { const ro = readOnlyBlock(); if (ro) return ro; }
   if (!(balance >= -CAP_AFTER_9YRS && balance <= CAP_AFTER_9YRS))
     return {ok: false, error:
         `Balance must be between -${CAP_AFTER_9YRS} and ${CAP_AFTER_9YRS}.`};
@@ -1301,11 +1351,76 @@ $("birthClear").addEventListener("click", async () => {
   if (out && out.ok) await refresh();
 });
 
+/* ------------------------------------------------ Google Sheets sync ---- */
+
+function syncBar(kind, msg) {
+  const bar = $("syncBar"), out = $("syncMsg");
+  if (!bar || !out) return;
+  bar.hidden = false;
+  bar.classList.toggle("err", kind === "error" || kind === "conflict");
+  bar.classList.toggle("ro", kind === "readonly");
+  out.textContent = msg;
+  $("syncOff").hidden = !(STORE && STORE.isSheet());
+}
+
+/* Drive permissions are the permission model: a Viewer sees the plan but
+   every control that would write is disabled. */
+function applyReadOnly() {
+  if (!STORE || !STORE.isSheet() || STORE.canEdit()) return;
+  for (const id of ["edSaveB", "edSaveNR", "edClear", "edHoliday",
+                    "edUnholiday", "restoreBtn", "hireDate", "birthDate",
+                    "birthClear"]) {
+    const el = $(id);
+    if (el) el.disabled = true;
+  }
+  syncBar("readonly", "Read-only — this Sheet is shared with you as a Viewer.");
+}
+
+async function syncConnect(opts) {
+  opts = opts || {};
+  try {
+    if (!opts.silent) syncBar("info", "Connecting to Google…");
+    await STORE.connect(opts);
+    await refresh();
+    applyReadOnly();
+  } catch (err) {
+    // a silent reconnect that fails just means "stay local" -- only an
+    // explicit click deserves a banner
+    if (opts.silent) return;
+    syncBar("error", err.message);
+  }
+}
+
+function initSync() {
+  const btn = $("syncBtn");
+  if (!STORE || !STORE.configured()) {
+    // no config.js: stay on localStorage and say nothing
+    return;
+  }
+  btn.hidden = false;
+  STORE.onStatus(s => {
+    if (s.kind === "saved") return;         // routine, not worth a banner
+    syncBar(s.kind, s.message);
+  });
+  btn.addEventListener("click", () => syncConnect({}));
+  $("syncPick").addEventListener("click", () => syncConnect({pick: true}));
+  $("syncOff").addEventListener("click", async () => {
+    STORE.signOut();
+    await refresh();
+  });
+  // returning users are reconnected without a prompt
+  syncConnect({silent: true});
+}
+
+/* A pending Sheet write must not be lost to a closing tab. */
+window.addEventListener("beforeunload", () => { if (STORE) STORE.flush(); });
+
 (() => {
   fetchState();
   const t = parseISO(STATE.today);
   viewYear = t.getUTCFullYear(); viewMonth = t.getUTCMonth();
   renderTiles(); renderCalendar(); renderChart(); renderHire();
+  initSync();
 })();
 </script>
 </body>
