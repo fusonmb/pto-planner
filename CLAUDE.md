@@ -9,9 +9,9 @@ Personal leave-planning app for mfuson (MITRE). **One build** as of
 2026-08-19:
 
 - `leave_planner.html` — pure HTML/JS single file. Deployed as `index.html`
-  on the user's GitHub Pages site (each commit auto-redeploys). `index.html`
-  is a byte-identical copy — keep the two in sync after every change
-  (`md5sum index.html leave_planner.html`).
+  on the user's GitHub Pages site; pushing to `main` is the deploy, no
+  manual upload. `index.html` is a byte-identical copy — keep the two in
+  sync after every change (`md5sum index.html leave_planner.html`).
 - `sheets-store.js` — Google Sheets storage. Hydrates a cache once, then
   serves `loadData()` synchronously and flushes writes to the Sheet behind
   the UI, so the calc engine stays synchronous. localStorage is written on
@@ -126,6 +126,32 @@ Shared:
   with no balance is ignored rather than seeded at zero.
 - Drive permissions are the whole permission model. `readOnlyBlock()` gates
   all five mutating entry points so a Viewer cannot write through any path.
+
+## Working locally and on the web
+
+GitHub is the single source of truth; both surfaces clone from it.
+
+- **Push before you leave, pull before you start.** A Claude Code web session
+  clones the *remote*, so it cannot see local commits you have not pushed.
+- **Deploying is just pushing to `main`.** GitHub Pages serves `index.html`
+  from `main` and rebuilds in well under a minute. There is no build step
+  and no manual upload.
+- **Local pushes work** through Git Credential Manager (VSCode extension or
+  a terminal). **Web-session pushes needed `/web-setup`** to sync a `gh`
+  token to the Claude account — a cloud session otherwise gets a read-only
+  credential and every push fails with 403. If a web session cannot push,
+  bring the branch here (`git bundle`, or `claude --teleport` once the
+  branch exists on the remote) and push from this machine.
+- **Leave data never syncs through git** (`leave_data.json` and localStorage
+  are gitignored). That is what the Google Sheets backend is for.
+
+## Toolchain on this machine
+
+- Node 24 LTS at `C:\Program Files
+odejs` (winget `OpenJS.NodeJS.LTS`) —
+  needed for `node test/run.js`.
+- GitHub CLI at `C:\Program Files\GitHub CLI` (winget `GitHub.cli`).
+- Python 3.12 at `%LOCALAPPDATA%\Programs\Python\Python312`.
 
 ## Gotchas
 
