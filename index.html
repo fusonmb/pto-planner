@@ -334,13 +334,16 @@
 <script>
 "use strict";
 /* ============================================================ calc engine */
+// Reference Sunday for the two-week pay-period grid.  This is a property of
+// the MITRE pay calendar, not of any person, so it is safe to ship publicly.
+// The BALANCE on that Sunday, and the hire date, are personal: they live in
+// the user's private Sheet (Config) or in this browser, never in this file.
 const ORIGINAL_ANCHOR = "2026-07-26";     // a period Sunday
-const ORIGINAL_BALANCE = 135.92;
 const ACCRUAL_BASE = 6.7692;              // hours per two-week period
 const ACCRUAL_AFTER_9YRS = 8.0;           // rate after nine years employed
 const CAP_BASE = 240;
 const CAP_AFTER_9YRS = 320;
-const DEFAULT_HIRE_DATE = "2018-11-13";   // 9-year mark: Nov 13, 2027
+const STEP_YEARS = 9;                     // years of service for the step-up
 const PARENTAL_TOTAL = 480;               // 12 weeks x 40 h per benefit year
 const MAX_DAY_HOURS = 8;                  // combined B + NR limit per day
 const PERIOD_DAYS = 14;
@@ -448,13 +451,16 @@ function readOnlyBlock() {
   return null;
 }
 
+/* No anchor means the planner has not been told a starting balance yet.
+   There is deliberately no default: a wrong balance is worse than none, and
+   shipping a real one would publish it on a public GitHub Pages site. */
 function effectiveAnchor(data) {
   if (data.anchor) return [data.anchor.date, data.anchor.balance];
-  return [ORIGINAL_ANCHOR, ORIGINAL_BALANCE];
+  return [null, null];
 }
 
 function effectiveHire(data) {
-  return data.hireDate || DEFAULT_HIRE_DATE;
+  return data.hireDate || null;
 }
 
 function effectiveBirth(data) {
@@ -490,7 +496,9 @@ function computeProjection(entries, todayIso, anchorIso, anchorBal, hireIso,
   // balance keeps full precision.  Parental (NR): rows carry the remaining
   // 480 h from the birth date; it hits zero one year later and never goes
   // negative.
-  const nineYears = addYearsIso(hireIso || DEFAULT_HIRE_DATE, 9);
+  if (!anchorIso || !isFinite(anchorBal)) return [];   // not configured yet
+  // with no hire date the step-up cannot be dated, so it never applies
+  const nineYears = hireIso ? addYearsIso(hireIso, STEP_YEARS) : null;
   const expiry = birthIso ? addYearsIso(birthIso, 1) : null;
   const nrRem = asOf => {
     if (!birthIso || asOf < birthIso) return null;
@@ -502,7 +510,8 @@ function computeProjection(entries, todayIso, anchorIso, anchorBal, hireIso,
   };
   const rows = [{date: anchorIso, used: 0, accrued: 0, lost: 0,
                  balance: anchorBal,
-                 cap: anchorIso >= nineYears ? CAP_AFTER_9YRS : CAP_BASE,
+                 cap: nineYears && anchorIso >= nineYears
+                      ? CAP_AFTER_9YRS : CAP_BASE,
                  nrUsed: 0, nrRemaining: nrRem(anchorIso),
                  overdrawn: false}];
   let balance = anchorBal;
@@ -512,7 +521,7 @@ function computeProjection(entries, todayIso, anchorIso, anchorBal, hireIso,
   sunday.setUTCDate(sunday.getUTCDate() + PERIOD_DAYS);
   while (sunday <= end) {
     const s1 = iso(sunday);
-    const senior = s1 >= nineYears;
+    const senior = !!nineYears && s1 >= nineYears;
     const rate = senior ? ACCRUAL_AFTER_9YRS : ACCRUAL_BASE;
     const cap = senior ? CAP_AFTER_9YRS : CAP_BASE;
     const start = new Date(sunday);
@@ -544,9 +553,10 @@ function buildState() {
   return {
     anchor: anchorIso, anchorBalance: anchorBal,
     anchorEdited: data.anchor !== null,
+    needsSetup: !anchorIso,
     accrual: ACCRUAL_BASE, periodDays: PERIOD_DAYS, cap: CAP_BASE, today,
     hireDate: hire,
-    nineYearDate: addYearsIso(hire, 9),
+    nineYearDate: hire ? addYearsIso(hire, STEP_YEARS) : null,
     birthDate: birth,
     parentalExpiry: birth ? addYearsIso(birth, 1) : null,
     parentalTotal: PARENTAL_TOTAL,
@@ -570,6 +580,9 @@ function applyEntry({dates, hours, label, leaveType, clear}) {
     return {ok: false, error: "Parental leave is taken in 1-hour increments."};
   const data = loadData();
   const [anchorIso] = effectiveAnchor(data);
+  if (!anchorIso)
+    return {ok: false, error: "Set your current balance first — click the "
+                             + "Current balance tile."};
   const hols = mergedHolidays(data);
   const skipped = dates.filter(d => d <= anchorIso);
   let valid = dates.filter(d => d > anchorIso);
@@ -762,7 +775,27 @@ async function post(url, body) {
 }
 
 /* ------------------------------------------------ summary tiles */
+/* First run, or a browser with no plan yet.  The balance tile stays
+   click-to-edit so the prompt is also the way to resolve it. */
+function renderSetupTiles() {
+  $("subAnchor").textContent =
+      "no starting balance set — the pay-period grid runs from "
+      + fmtDate(ORIGINAL_ANCHOR);
+  $("tiles").innerHTML =
+    `<div class="tile"><div class="label">Current balance</div>` +
+    `<div class="value editable" title="Click to set your current balance">` +
+    `— ${unitSuffix()}</div>` +
+    `<div class="note">click to set your balance on a period Sunday</div></div>` +
+    `<div class="tile"><div class="label">Getting started</div>` +
+    `<div class="value">Set up</div>` +
+    `<div class="note">enter your current PTOB balance to begin; add a hire ` +
+    `date below for the nine-year step-up</div></div>`;
+  const balVal = $("tiles").children[0].querySelector(".value");
+  balVal.addEventListener("click", () => editBalance(balVal, 0));
+}
+
 function renderTiles() {
+  if (STATE.needsSetup) return renderSetupTiles();
   $("subAnchor").textContent = "anchor " + fmtU(STATE.anchorBalance) + " " +
       unitSuffix() + " on " +
       fmtDate(STATE.anchor) + (STATE.anchorEdited ? " (edited)" : "");
@@ -1242,10 +1275,13 @@ function renderChart() {
 
 /* ------------------------------------------------ wiring */
 function renderHire() {
-  $("hireDate").value = STATE.hireDate;
+  $("hireDate").value = STATE.hireDate || "";
   $("birthDate").value = STATE.birthDate || "";
-  let info = "9-year mark " + fmtDate(STATE.nineYearDate) +
-      ": accrual 6.7692 → 8.000 h/period, cap 240 → 320 h";
+  let info = STATE.nineYearDate
+      ? "9-year mark " + fmtDate(STATE.nineYearDate) +
+        ": accrual 6.7692 → 8.000 h/period, cap 240 → 320 h"
+      : "set a hire date to model the nine-year step-up "
+        + "(accrual 6.7692 → 8.000 h/period, cap 240 → 320 h)";
   info += STATE.birthDate
       ? " · parental leave: 480 h from " + fmtDate(STATE.birthDate) +
         " until " + fmtDate(STATE.parentalExpiry)

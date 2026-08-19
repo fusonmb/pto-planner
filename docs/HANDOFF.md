@@ -135,6 +135,28 @@ conflict the app keeps the edit in localStorage, refuses to push, and asks
 for a reload. Adequate for two people who rarely edit at once — do not
 stretch this design to more.
 
+## Personal data
+
+The repository is public and serves GitHub Pages, so the app ships with **no
+personal values**:
+
+- `anchorBalance` (your PTOB balance) — Sheet `Config`, or this browser
+- `hireDate` — Sheet `Config`, or this browser; without it the nine-year
+  step-up simply does not apply
+- `childBirthDate` — Sheet `Config`, or this browser
+
+Only `ORIGINAL_ANCHOR` (2026-07-26) remains in code. That is the reference
+Sunday for the two-week pay-period grid — a property of the MITRE pay
+calendar, not of any person.
+
+With nothing configured the app renders a setup state rather than a
+misleading zero, and refuses to book leave until a starting balance exists.
+
+Until 2026-08-19 the real balance (135.92 h) and hire date were hardcoded in
+`index.html` and served publicly. They were removed from the working tree,
+including the v1 archive and the test fixtures, but **they remain in git
+history** — scrubbing that is a separate decision.
+
 ## Constraints preserved
 
 No build step. No secrets in the repo. A failed API call degrades to

@@ -51,9 +51,9 @@ var THEME = {
 
 var CONFIG_DEFAULTS = [
   ['displayName',    'Leave Planner', 'Shown on the Dashboard'],
-  ['hireDate',       '2018-11-13',    'Drives the nine-year step-up'],
+  ['hireDate',       '',              'Your hire date — drives the nine-year step-up'],
   ['anchorSunday',   '2026-07-26',    'A pay-period posting Sunday'],
-  ['anchorBalance',  '135.92',        'Known PTOB balance ON anchorSunday'],
+  ['anchorBalance',  '',              'Your known PTOB balance ON anchorSunday'],
   ['childBirthDate', '',              'Blank disables parental leave'],
   ['hoursPerDay',    '8',             'Display only: hours per leave day'],
   ['maxDayHours',    '8',             'Max combined hours on any one day'],

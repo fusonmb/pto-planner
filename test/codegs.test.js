@@ -43,8 +43,8 @@ const SCENARIOS = [
     birth: null, entries: { "2026-09-04": DAY(8, 0, "") } },
 ];
 
-const DEF = { today: "2026-08-19", anchor: "2026-07-26", balance: 135.92,
-              hire: "2018-11-13" };
+const DEF = { today: "2026-08-19", anchor: "2026-07-26", balance: 100.00,
+              hire: "2018-10-05" };
 
 for (const sc of SCENARIOS) {
   check(`engines agree: ${sc.name}`, () => {
@@ -74,7 +74,7 @@ check("Code.gs reproduces the golden fixture exactly", () => {
     "2026-11-27": DAY(8, 0, "long weekend"),
     "2027-01-04": DAY(8, 0, "new year"),
     "2027-11-15": DAY(8, 0, "after the step-up"),
-  }, "2026-08-19", "2026-07-26", 135.92, "2018-11-13", "2026-08-17");
+  }, "2026-08-19", "2026-07-26", 100.00, "2018-10-05", "2026-08-17");
   const actual = JSON.stringify(rows, null, 2) + "\n";
   const want = fs.readFileSync(FIX, "utf8");
   if (actual !== want) {
@@ -87,7 +87,7 @@ check("Code.gs reproduces the golden fixture exactly", () => {
 
 check("shared date helpers agree", () => {
   for (const [d, n] of [["2028-02-29", 1], ["2026-08-01", 1],
-                        ["2018-11-13", 9], ["2024-02-29", 4]]) {
+                        ["2018-10-05", 9], ["2024-02-29", 4]]) {
     const x = app.addYearsIso(d, n), y = gas.addYearsIso_(d, n);
     if (x !== y) throw new Error(`addYears(${d},${n}): app ${x}, Code.gs ${y}`);
   }

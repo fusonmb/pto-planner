@@ -46,12 +46,15 @@ Documents — refresh it after every change.
 
 PTOB (B) — green (`--leave-b`):
 - Accrues 6.7692 h per two-week pay period; balance posts every other
-  Sunday on the grid anchored at Sun 2026-07-26 (original anchor:
-  135.92 h that day). Running balance keeps full float precision;
-  rows round only for display.
-- At 9 years from hire date (default 2018-11-13 → mark 2027-11-13, editable
-  in footer): accrual → 8.000 h, cap 240 h → 320 h. Applied from the first
-  period Sunday on/after the anniversary. Over-cap accrual is "lost".
+  Sunday on the grid anchored at Sun 2026-07-26. That grid date is a pay-
+  calendar fact and ships in the code; the **balance** on it is personal and
+  does not — it lives in the Sheet's `Config` (`anchorBalance`) or in this
+  browser. Running balance keeps full float precision; rows round only for
+  display.
+- At 9 years from hire date (set in the footer or the Sheet's `Config`;
+  there is **no default** — the step-up simply does not apply until one is
+  set): accrual → 8.000 h, cap 240 h → 320 h. Applied from the first period
+  Sunday on/after the anniversary. Over-cap accrual is "lost".
 - Balance may go negative (flagged red "overdrawn").
 - Current balance is click-editable on its tile, re-anchorable to any past
   period Sunday (validated against the 14-day grid).

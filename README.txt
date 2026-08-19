@@ -6,10 +6,12 @@ Built 2026-08-06 with Claude Code.
 Leave types:
   PTOB (B) — green.  6.7692 h accrue every two weeks (posts every other
     Sunday), rising to 8.000 h after nine years of employment; cap 240 h,
-    rising to 320 h at the same nine-year mark.  Hire date is editable at
-    the bottom (default 2018-11-13 -> nine-year mark 2027-11-13).
-    Original anchor 135.92 h on Sun 2026-07-26; click the Current balance
-    tile to re-anchor from any period Sunday.
+    rising to 320 h at the same nine-year mark.  Set your hire date at the
+    bottom of the page (there is no default; without it the step-up is not
+    applied).  Click the Current balance tile to set your balance on any
+    pay-period Sunday.  Your balance, hire date and child's birth date are
+    yours: they live in your browser or your private Google Sheet, never in
+    this repository.
   Parental (NR) — pink.  480 h (12 weeks) per benefit year, available
     from the child's birth date (set it at the bottom), taken in 1-hour
     increments, never negative, expires one year after birth (red dotted

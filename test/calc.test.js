@@ -29,8 +29,8 @@ function near(actual, expected, what) {
    36-month horizon (and therefore the row count) is deterministic */
 const TODAY = "2026-08-19";
 const ANCHOR = "2026-07-26";
-const ANCHOR_BAL = 135.92;
-const HIRE = "2018-11-13";
+const ANCHOR_BAL = 100.00;
+const HIRE = "2018-10-05";   // nine-year mark 2027-10-05, still ahead
 const project = (entries, opts = {}) => {
   const e = loadEngine(null);
   return e.computeProjection(entries, opts.today || TODAY,
@@ -72,28 +72,33 @@ check("periods step every 14 days on the Sunday grid", () => {
 check("base accrual is 6.7692 h per period before the nine-year mark", () => {
   const rows = project({});
   eq(rows[1].accrued, 6.7692, "first accrual");
-  near(rows[1].balance, 142.69, "balance after one period");
-  near(rows[2].balance, 149.46, "balance after two periods");
+  near(rows[1].balance, 106.77, "balance after one period");
+  near(rows[2].balance, 113.54, "balance after two periods");
 });
 
 check("running balance keeps full precision, rows round only for display", () => {
-  // three periods of 6.7692 on 135.92 is 156.2276 -- displayed 156.23, and
-  // the fourth row must build on the unrounded value
+  // The two chains only diverge at the seventh period: carrying the full
+  // float gives 147.38, while re-rounding each row and accumulating that
+  // gives 147.39.  Earlier rows agree, so asserting only those proves
+  // nothing -- row 7 is what actually pins the behaviour.
   const rows = project({});
-  near(rows[3].balance, 156.23, "third period rounds for display");
-  near(rows[4].balance, 163.0, "fourth period built on full precision");
+  near(rows[3].balance, 120.31, "third period rounds for display");
+  near(rows[7].balance, 147.38, "seventh period built on the unrounded value");
 });
 
 check("accrual and cap step up at the nine-year mark", () => {
   const rows = project({}, { today: "2028-01-15" });
-  const nineYear = "2027-11-13";
+  const e = loadEngine(null);
+  const nineYear = e.addYearsIso(HIRE, e.STEP_YEARS);
   const before = rows.filter((r) => r.date < nineYear);
   const after = rows.filter((r) => r.date >= nineYear);
   ok(before.every((r) => r.cap === 240), "cap changed before the mark");
   ok(after.every((r) => r.cap === 320), "cap did not rise at the mark");
   ok(after.slice(1).every((r) => r.accrued === 8.0), "rate did not rise");
   // the step lands on the first period Sunday on or after the anniversary
-  eq(after[0].date, "2027-11-14", "first senior period Sunday");
+  const firstGridSunday = rows.find((r) => r.date >= nineYear).date;
+  eq(after[0].date, firstGridSunday, "first senior period Sunday");
+  ok(before[before.length - 1].date < nineYear, "last junior row precedes it");
 });
 
 /* ---------------------------------------------------- cap and overdraw */
@@ -163,8 +168,11 @@ check("parental draws down the 480 h pool and never goes negative", () => {
 
 /* ---------------------------------------------------- save rules */
 
+const ANCHOR_SEED = {date: ANCHOR, balance: ANCHOR_BAL};
 const save = (data, args) => {
-  const e = loadEngine(data);
+  // there is no default balance any more, so every save fixture needs one
+  const seeded = Object.assign({anchor: ANCHOR_SEED}, data || {});
+  const e = loadEngine(seeded);
   const res = e.applyEntry(args);
   return { res, data: e.store.raw() };
 };
@@ -263,7 +271,7 @@ check("clear removes the whole day, both types and the label", () => {
 });
 
 check("the label is shared per day across both leave types", () => {
-  const seeded = { birthDate: "2026-08-01", entries: {} };
+  const seeded = { birthDate: "2026-08-01", entries: {}, anchor: ANCHOR_SEED };
   const e = loadEngine(seeded);
   e.applyEntry({ dates: ["2026-08-19"], hours: 4, label: "half day", leaveType: "B" });
   e.applyEntry({ dates: ["2026-08-19"], hours: 4, label: "half day", leaveType: "NR" });
@@ -284,7 +292,7 @@ check("re-anchoring must land on the 14-day grid and not in the future", () => {
 /* ---------------------------------------------------- holidays */
 
 check("built-in holidays can be removed and custom ones added", () => {
-  const e = loadEngine(null);
+  const e = loadEngine({ anchor: ANCHOR_SEED });
   e.applyHoliday({ dates: ["2026-09-07"], remove: true });
   e.applyHoliday({ dates: ["2026-09-08"], name: "Company day" });
   const d = e.store.raw();

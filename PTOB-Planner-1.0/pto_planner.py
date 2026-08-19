@@ -5,7 +5,7 @@ Accrual rules:
   * 6.7692 hours accrue every two-week period; 8.000 hours after nine
     years of employment (hire date is configurable in the app).
   * The balance is calculated on every other Sunday (period Sundays).
-  * Anchor: 135.92 hours as of Sunday, July 26, 2026.
+  * Anchor: set your own balance as of a pay-period Sunday.
   * Balance is capped at 240 hours (320 after nine years) -- accrual
     above the cap is lost.
 
@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ANCHOR_DATE = date(2026, 7, 26)      # a period Sunday
-ANCHOR_BALANCE = 135.92
+ANCHOR_BALANCE = 0.0    # personal value removed (see README)
 ACCRUAL_BASE = 6.7692                # hours accrued per two-week period
 ACCRUAL_AFTER_9YRS = 8.0             # rate after nine years of employment
 CAP_BASE = 240.0

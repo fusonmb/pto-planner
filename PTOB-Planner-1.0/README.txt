@@ -5,8 +5,8 @@ Built 2026-08-06 with Claude Code.
 Rules: 6.7692 h accrue every two weeks (balance posts every other Sunday),
 rising to 8.000 h after nine years of employment; cap 240 h, rising to
 320 h at the same nine-year mark. Hire date is editable at the bottom of
-the app (default 2018-11-13, i.e. nine-year mark 2027-11-13).
-Original anchor 135.92 h on Sun 2026-07-26. Company holidays through
+the app (no default is shipped; set your own).
+Set your own anchor balance on a pay-period Sunday. Company holidays through
 2030 (from the MITRE pay calendars) are built in.
 
 Two interchangeable versions:
@@ -33,3 +33,9 @@ Files:
   pto_planner.html  the standalone HTML version
   pto_data.json     your saved plan (Python version's data)
   PTO Planner.bat   double-click launcher for the Python version
+
+
+Note (2026-08-19): this v1.0 archive originally hard-coded a real leave
+balance and hire date.  Both were replaced with neutral placeholders when
+the repository's personal data was cleaned up; the archive is otherwise
+unchanged.  The values remain in this repository's git history.

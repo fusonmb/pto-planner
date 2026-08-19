@@ -90,13 +90,13 @@ check("config carries the anchor balance, not just the anchor date", () => {
   const data = I.emptyData();
   I.readConfigInto([
     ["Key", "Value", "Notes"],
-    ["hireDate", "2018-11-13", ""],
+    ["hireDate", "2015-03-09", ""],
     ["anchorSunday", "2026-07-26", ""],
-    ["anchorBalance", "135.92", ""],
+    ["anchorBalance", "100.00", ""],
     ["childBirthDate", "2026-08-17", ""],
   ], data);
-  eq(data.anchor, { date: "2026-07-26", balance: 135.92 }, "anchor");
-  eq(data.hireDate, "2018-11-13", "hire date");
+  eq(data.anchor, { date: "2026-07-26", balance: 100.00 }, "anchor");
+  eq(data.hireDate, "2015-03-09", "hire date");
   eq(data.birthDate, "2026-08-17", "birth date");
 });
 

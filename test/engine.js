@@ -75,8 +75,8 @@ function extract(src) {
   // `const` declarations stay lexical and never land on the sandbox global,
   // so re-export by name everything the tests need to reach.
   const EXPORTS = [
-    "ORIGINAL_ANCHOR", "ORIGINAL_BALANCE", "ACCRUAL_BASE", "ACCRUAL_AFTER_9YRS",
-    "CAP_BASE", "CAP_AFTER_9YRS", "DEFAULT_HIRE_DATE", "PARENTAL_TOTAL",
+    "ORIGINAL_ANCHOR", "ACCRUAL_BASE", "ACCRUAL_AFTER_9YRS",
+    "CAP_BASE", "CAP_AFTER_9YRS", "STEP_YEARS", "PARENTAL_TOTAL",
     "MAX_DAY_HOURS", "PERIOD_DAYS", "BUILTIN_HOLIDAYS", "STORE_KEY",
     "iso", "parseISO", "isWeekend", "periodIndex", "r2",
   ];
