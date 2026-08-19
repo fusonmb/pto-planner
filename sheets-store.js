@@ -227,6 +227,18 @@ var LeaveStore = (function () {
     return (vr && vr.values) || [];
   }
 
+  function count(o) { return Object.keys(o || {}).length; }
+
+  /**
+   * A Sheet with no leave rows, against a browser that has a plan, is a
+   * first connection -- not an instruction to erase the plan.  Overwriting
+   * localStorage here would destroy both copies at once, which is the one
+   * unrecoverable failure in this design.
+   */
+  function needsSeeding(fromSheet, fromLocal) {
+    return count(fromSheet.entries) === 0 && count(fromLocal.entries) > 0;
+  }
+
   /** Pull the whole Sheet into the app's data shape. */
   function hydrate() {
     if (state.mode !== "sheet") {
@@ -240,6 +252,28 @@ var LeaveStore = (function () {
         state.types = readTypes(grid(res, 1));
         readLeaveInto(grid(res, 2), state.types, data);
         readHolidaysInto(grid(res, 3), data);
+
+        var local = localRead();
+        if (needsSeeding(data, local)) {
+          if (!state.canEdit) {
+            // a Viewer on an empty Sheet: show what this browser has rather
+            // than a blank plan, and touch nothing
+            state.cache = local;
+            log("info", "This Sheet has no leave yet — showing this "
+                      + "browser's copy. You have Viewer access, so it "
+                      + "cannot be uploaded.");
+            return state.cache;
+          }
+          // the one-time migration: this browser's plan becomes the Sheet's
+          state.cache = local;
+          state.dirty = true;
+          log("info", "Moving this browser's plan into the Sheet…");
+          return flush().then(function () {
+            log("saved", "Plan migrated to Google Sheets.");
+            return state.cache;
+          });
+        }
+
         state.cache = data;
         localWrite(data);            // keep the offline fallback current
         return data;
@@ -502,7 +536,8 @@ var LeaveStore = (function () {
     _internals: { readLeaveInto: readLeaveInto, readHolidaysInto: readHolidaysInto,
                   readConfigInto: readConfigInto, readTypes: readTypes,
                   leaveRows: leaveRows, holidayRows: holidayRows,
-                  emptyData: emptyData, isoOf: isoOf },
+                  emptyData: emptyData, isoOf: isoOf,
+                  needsSeeding: needsSeeding },
   };
 })();
 

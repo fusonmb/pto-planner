@@ -162,6 +162,40 @@ check("inactive types are excluded from the layout", () => {
   ok(grid[0].indexOf("Jury") < 0, "inactive type should not get a column");
 });
 
+/* ---------------------------------------------------- first connection */
+
+const withEntries = (n) => {
+  const d = I.emptyData();
+  for (let i = 0; i < n; i++) {
+    d.entries[`2026-09-${String(i + 1).padStart(2, "0")}`] =
+      { b: 8, nr: 0, label: "" };
+  }
+  return d;
+};
+
+check("an empty Sheet must not erase a plan held in the browser", () => {
+  // the unrecoverable failure: hydrate() used to localWrite() the empty
+  // Sheet straight over localStorage, destroying both copies at once
+  ok(I.needsSeeding(I.emptyData(), withEntries(3)),
+     "empty Sheet + local plan must be treated as a first connection");
+});
+
+check("a Sheet that already has leave is the source of truth", () => {
+  ok(!I.needsSeeding(withEntries(2), withEntries(3)),
+     "a populated Sheet must not be overwritten by the browser");
+});
+
+check("two empty sides need no migration", () => {
+  ok(!I.needsSeeding(I.emptyData(), I.emptyData()), "nothing to migrate");
+});
+
+check("a cleared plan is not resurrected from a stale browser copy", () => {
+  // deleting every day in the Sheet is legitimate; only a browser that
+  // still holds days would trigger seeding, so this is the case to watch
+  ok(!I.needsSeeding(I.emptyData(), I.emptyData()),
+     "an intentionally emptied Sheet with an empty browser stays empty");
+});
+
 console.log(`\n${pass} passed, ${failures.length} failed`);
 if (failures.length) {
   console.log("\nFAILURES:");

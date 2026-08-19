@@ -10,7 +10,7 @@ decisions taken, and what is left.
 |---|---|
 | Keep the Python build? | **No.** Retired 2026-08-19; in git history if needed. `leave_planner.html` (deployed as `index.html`) is the only build. |
 | Sheet read-only or editable? | **Editable.** The Sheet is a real editing surface, not just a mirror, so the parse path is a first-class input. |
-| Spouse access | Drive permissions are the permission model. Viewer = read-only, Editor = can edit. No per-row auth. |
+| Spouse access | **Editor.** Drive permissions are the permission model: Viewer = read-only, Editor = can edit. No per-row auth. |
 | Holiday ownership | Code keeps the built-in list; the Sheet stores overrides (`custom` adds, `removed` tombstones), matching what the app already did. |
 | Scope | `drive.file`. Narrow on purpose — see `config.example.js`. |
 
@@ -113,12 +113,27 @@ accrual rate and the cap ordering makes them go red.
    GitHub Pages only serves what is in the repo, and both values are public
    by design).
 2. **Create the Sheet**, paste `apps-script/Code.gs`, run `setup()`.
-3. **One-time migration** of existing `localStorage` data into the Sheet.
-   Not yet written — the Backup export is the interim path.
+3. ~~One-time migration of existing `localStorage` data into the Sheet.~~
+   **Done.** On first connection, a Sheet with no leave rows against a
+   browser that has a plan is treated as a migration, not as an instruction
+   to erase: the browser's plan is pushed up. Overwriting localStorage there
+   would have destroyed both copies at once — the one unrecoverable failure
+   in this design. A Viewer on an empty Sheet sees their browser copy and
+   nothing is written.
 4. **Verify as a Viewer account** that every editing control is disabled.
    `readOnlyBlock()` gates all five mutating entry points, but this has not
    been exercised against a real Viewer session.
 5. **`manifest.json` + icons** so the page installs to the phone home screen.
+
+## Concurrent edits
+
+With the spouse as an Editor, her hand-edits and the app's saves can collide.
+The guard is the Drive `headRevisionId` check before every write, and it is
+**advisory**: there is a window between the check and the write, so it
+catches an edit made minutes ago, not one made in the same second. On a
+conflict the app keeps the edit in localStorage, refuses to push, and asks
+for a reload. Adequate for two people who rarely edit at once — do not
+stretch this design to more.
 
 ## Constraints preserved
 
