@@ -345,6 +345,61 @@ check("golden projection fixture is unchanged", () => {
   }
 });
 
+/* ------------------------------------------- first-run setup */
+/* The shipped app crashed here: with no anchor the projection is empty and
+   STATE.anchor is null, so the balance tile's click handler called
+   parseISO(null) and threw before it could open.  The tile was the only way
+   to set a starting balance, which made a fresh browser unusable. */
+
+check("latestPeriodSunday lands on the 14-day grid", () => {
+  const E = loadEngine(null);
+  const s = E.latestPeriodSunday("2026-08-20");
+  eq(s, "2026-08-09", "latest period Sunday");
+  const diff = (E.parseISO(s) - E.parseISO("2026-07-26")) / 86400000;
+  eq(diff % 14, 0, "offset from the original anchor");
+});
+
+check("latestPeriodSunday never returns a future Sunday", () => {
+  const E = loadEngine(null);
+  for (const day of ["2026-07-26", "2026-08-08", "2026-08-09", "2026-08-22"])
+    ok(E.latestPeriodSunday(day) <= day, `${day} -> ${E.latestPeriodSunday(day)}`);
+});
+
+check("a fresh browser can still seed the balance tile", () => {
+  const E = loadEngine(null);
+  const st = E.buildState();
+  ok(st.needsSetup, "expected setup mode");
+  eq(st.anchor, null, "anchor");
+  eq(st.projection.length, 0, "projection rows");
+  // the seed expression editBalance uses; this is what used to throw
+  const latest = [...st.projection].filter(r => r.date <= st.today).pop();
+  const seed = latest ? latest.date
+                      : (st.anchor || E.latestPeriodSunday(st.today));
+  ok(typeof seed === "string" && seed, "seed date");
+});
+
+check("every Sunday the setup tile offers is a valid anchor", () => {
+  const E = loadEngine(null);
+  const st = E.buildState();
+  const d = E.parseISO(E.latestPeriodSunday(st.today));
+  for (let i = 0; i < 27; i++) {
+    const when = E.iso(d);
+    const out = E.applyAnchor({balance: 100, date: when});
+    ok(out.ok, `applyAnchor rejected offered date ${when}: ${out.error}`);
+    d.setUTCDate(d.getUTCDate() - 14);
+  }
+});
+
+check("setting the balance from setup mode leaves setup mode", () => {
+  const E = loadEngine(null);
+  const when = E.latestPeriodSunday(E.buildState().today);
+  ok(E.applyAnchor({balance: 123.5, date: when}).ok, "applyAnchor");
+  const after = E.buildState();
+  ok(!after.needsSetup, "still in setup mode after anchoring");
+  near(after.anchorBalance, 123.5, "anchor balance");
+  ok(after.projection.length > 0, "projection stayed empty");
+});
+
 /* ---------------------------------------------------- report */
 
 console.log(`\n${pass} passed, ${failures.length} failed`);

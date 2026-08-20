@@ -689,19 +689,24 @@ function applyHireDate({date: when}) {
   return {ok: true};
 }
 
+/* The most recent period Sunday on or before `whenIso`, walking the 14-day
+   grid out of ORIGINAL_ANCHOR.  This is the only sound starting point before
+   an anchor exists, so first-run setup and applyAnchor share it. */
+function latestPeriodSunday(whenIso) {
+  const periods = Math.max(0, Math.floor(
+      (parseISO(whenIso) - parseISO(ORIGINAL_ANCHOR)) / 86400000 / PERIOD_DAYS));
+  const d = parseISO(ORIGINAL_ANCHOR);
+  d.setUTCDate(d.getUTCDate() + periods * PERIOD_DAYS);
+  return iso(d);
+}
+
 function applyAnchor({balance, date: when}) {
   { const ro = readOnlyBlock(); if (ro) return ro; }
   if (!(balance >= -CAP_AFTER_9YRS && balance <= CAP_AFTER_9YRS))
     return {ok: false, error:
         `Balance must be between -${CAP_AFTER_9YRS} and ${CAP_AFTER_9YRS}.`};
   const today = localTodayIso();
-  if (!when) {
-    const periods = Math.max(0, Math.floor(
-        (parseISO(today) - parseISO(ORIGINAL_ANCHOR)) / 86400000 / PERIOD_DAYS));
-    const d = parseISO(ORIGINAL_ANCHOR);
-    d.setUTCDate(d.getUTCDate() + periods * PERIOD_DAYS);
-    when = iso(d);
-  }
+  if (!when) when = latestPeriodSunday(today);
   const diff = (parseISO(when) - parseISO(ORIGINAL_ANCHOR)) / 86400000;
   if (diff % PERIOD_DAYS !== 0)
     return {ok: false, error: "Date must be a period Sunday on the accrual calendar."};
@@ -855,7 +860,10 @@ function editBalance(div, current) {
   // period Sundays on the accrual grid, most recent first, back ~1 year
   const latest = [...STATE.projection].filter(r => r.date <= STATE.today).pop();
   const sundays = [];
-  const d = parseISO(latest ? latest.date : STATE.anchor);
+  // First run has no anchor and an empty projection; fall back to the grid.
+  const seed = latest ? latest.date
+                      : (STATE.anchor || latestPeriodSunday(STATE.today));
+  const d = parseISO(seed);
   for (let i = 0; i < 27; i++) {
     sundays.push(iso(d));
     d.setUTCDate(d.getUTCDate() - 14);
