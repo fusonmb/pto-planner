@@ -390,17 +390,19 @@ function writeDashboard_(rows, cfg, todayIso) {
     if (rows[i].date <= todayIso) current = rows[i];
   }
 
+  // setValues demands a perfect rectangle: every row must be exactly as wide
+  // as the range, so the text-only rows carry two trailing blanks.
   var head = [
-    [String(cfg.displayName || 'Leave Planner')],
-    ['Balances are computed by the planner app; this tab is a read-only mirror.'],
-    ['Refreshed ' + todayIso + ' — reopen the Sheet or run refresh() to update.'],
-    [''],
+    [String(cfg.displayName || 'Leave Planner'), '', ''],
+    ['Balances are computed by the planner app; this tab is a read-only mirror.', '', ''],
+    ['Refreshed ' + todayIso + ' — reopen the Sheet or run refresh() to update.', '', ''],
+    ['', '', ''],
     ['Current PTOB', current.balance, 'as of ' + current.date],
     ['Cap', current.cap, ''],
     ['Parental remaining',
      current.nrRemaining === null ? 'n/a' : current.nrRemaining,
      cfg.childBirthDate ? 'expires ' + addYearsIso_(isoOf_(parseIso_(cfg.childBirthDate)), 1) : 'no birth date set'],
-    [''],
+    ['', '', ''],
   ];
   sh.getRange(1, 1, head.length, 3).setValues(head);
   sh.getRange(1, 1).setFontSize(14).setFontWeight('bold');
@@ -633,5 +635,6 @@ if (typeof module !== 'undefined' && module.exports) {
     isoOf_: isoOf_,
     defaultRules_: defaultRules_,
     rulesFromTypes_: rulesFromTypes_,
+    writeDashboard_: writeDashboard_,
   };
 }

@@ -164,6 +164,94 @@ check("no hire date means the step-up never applies", () => {
     throw new Error("cap stepped up without a hire date");
 });
 
+/* ------------------------------------------- Dashboard rendering */
+/* writeDashboard_ had no coverage because it needs SpreadsheetApp, and it was
+   broken: its header block mixed 1-wide and 3-wide rows, but setValues()
+   demands a perfect rectangle, so writing a *populated* Dashboard always threw
+   "The data has 1 but the range has 3".  This mock is the smallest surface
+   that catches shape errors. */
+
+function mockSheets() {
+  const writes = [];
+  const chain = new Proxy(function () {}, {
+    get: () => chain,
+    apply: () => chain,
+  });
+  const sheet = {
+    clear: () => sheet,
+    setFrozenRows: () => sheet,
+    autoResizeColumn: () => sheet,
+    autoResizeColumns: () => sheet,
+    getLastRow: () => 0,
+    getLastColumn: () => 0,
+    getMaxColumns: () => 26,
+    getRange: (row, col, nRows, nCols) => ({
+      setValues: (data) => {
+        writes.push({ row, col, nRows: nRows || 1, nCols: nCols || 1, data });
+        return chain;
+      },
+      setValue: () => chain,
+      setFontSize: () => chain, setFontWeight: () => chain,
+      setFontColor: () => chain, setBackground: () => chain,
+      setNumberFormat: () => chain, setHorizontalAlignment: () => chain,
+      setWrap: () => chain, setBorder: () => chain,
+      clearDataValidations: () => chain, setDataValidation: () => chain,
+    }),
+  };
+  global.SpreadsheetApp = {
+    getActive: () => ({ getSheetByName: () => sheet, getSheets: () => [sheet] }),
+  };
+  return writes;
+}
+
+function assertRectangular(writes) {
+  writes.forEach((w, i) => {
+    if (!Array.isArray(w.data))
+      throw new Error(`write ${i}: data is not an array`);
+    if (w.data.length !== w.nRows)
+      throw new Error(`write ${i}: ${w.data.length} rows into a range of ${w.nRows}`);
+    w.data.forEach((row, r) => {
+      if (!Array.isArray(row))
+        throw new Error(`write ${i} row ${r}: not an array`);
+      if (row.length !== w.nCols)
+        throw new Error(`write ${i} row ${r}: data has ${row.length} `
+                        + `but the range has ${w.nCols}`);
+    });
+  });
+}
+
+check("a populated Dashboard writes only rectangles", () => {
+  const writes = mockSheets();
+  const rows = gas.computeProjection_(
+      { "2026-08-19": DAY(8, 0, "dentist") },
+      "2026-08-20", "2026-08-09", 142.69, "2018-11-13", "2026-08-14");
+  if (!rows.length) throw new Error("fixture produced no rows");
+  gas.writeDashboard_(rows, {
+    displayName: "Leave Planner", childBirthDate: "2026-08-14",
+  }, "2026-08-20");
+  if (!writes.length) throw new Error("nothing was written");
+  assertRectangular(writes);
+});
+
+check("an empty Dashboard writes only rectangles", () => {
+  const writes = mockSheets();
+  gas.writeDashboard_([], { displayName: "Leave Planner" }, "2026-08-20");
+  if (!writes.length) throw new Error("nothing was written");
+  assertRectangular(writes);
+});
+
+check("the Dashboard reports the balance as of today, not the anchor", () => {
+  const writes = mockSheets();
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
+                                      "2018-11-13", null);
+  gas.writeDashboard_(rows, { displayName: "Leave Planner" }, "2026-08-20");
+  const head = writes[0].data;
+  const line = head.find(r => r[0] === "Current PTOB");
+  if (!line) throw new Error("no Current PTOB line");
+  if (line[2] !== "as of 2026-08-09")
+    throw new Error(`expected the 2026-08-09 row, got "${line[2]}"`);
+});
+
 console.log(`\n${pass} passed, ${failures.length} failed`);
 if (failures.length) {
   console.log("\nFAILURES:");
