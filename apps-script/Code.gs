@@ -140,7 +140,9 @@ var r2_ = function (v) { return Math.round(v * 100) / 100; };
 function computeProjection_(entries, todayIso, anchorIso, anchorBal, hireIso,
                             birthIso, rules) {
   rules = rules || defaultRules_();
-  var nineYears = addYearsIso_(hireIso, rules.stepYears);
+  if (!anchorIso || !isFinite(anchorBal)) return [];   // not configured yet
+  // with no hire date the step-up cannot be dated, so it never applies
+  var nineYears = hireIso ? addYearsIso_(hireIso, rules.stepYears) : null;
   var expiry = birthIso ? addYearsIso_(birthIso, 1) : null;
 
   function nrRem(asOf) {
@@ -156,7 +158,7 @@ function computeProjection_(entries, todayIso, anchorIso, anchorBal, hireIso,
   var rows = [{
     date: anchorIso, used: 0, accrued: 0, lost: 0,
     balance: anchorBal,
-    cap: anchorIso >= nineYears ? rules.capAfter : rules.capBase,
+    cap: nineYears && anchorIso >= nineYears ? rules.capAfter : rules.capBase,
     nrUsed: 0, nrRemaining: nrRem(anchorIso),
     overdrawn: false,
   }];
@@ -167,7 +169,7 @@ function computeProjection_(entries, todayIso, anchorIso, anchorBal, hireIso,
 
   while (sunday <= end) {
     var s1 = isoOf_(sunday);
-    var senior = s1 >= nineYears;
+    var senior = !!nineYears && s1 >= nineYears;
     var rate = senior ? rules.rateAfter : rules.rateBase;
     var cap = senior ? rules.capAfter : rules.capBase;
     var s0 = isoOf_(addDays_(sunday, -(PERIOD_DAYS - 1)));
@@ -338,9 +340,14 @@ function refresh() {
   var entries = readLeave_(types);
   var rules = rulesFromTypes_(types);
 
-  var anchorIso = isoOf_(parseIso_(cfg.anchorSunday));
-  var anchorBal = Number(cfg.anchorBalance) || 0;
-  var hireIso = isoOf_(parseIso_(cfg.hireDate));
+  // Blank Config cells are the normal first-run state, not an error.  An
+  // anchor date with no balance is ignored rather than seeded at zero: a
+  // confident projection from a made-up 0 is worse than no projection.
+  var anchorIso = cfg.anchorSunday ? isoOf_(parseIso_(cfg.anchorSunday)) : null;
+  var anchorBal = (cfg.anchorBalance === '' || cfg.anchorBalance === null ||
+                   cfg.anchorBalance === undefined)
+                  ? NaN : Number(cfg.anchorBalance);
+  var hireIso = cfg.hireDate ? isoOf_(parseIso_(cfg.hireDate)) : null;
   var birthIso = cfg.childBirthDate ? isoOf_(parseIso_(cfg.childBirthDate)) : null;
   var todayIso = isoOf_(new Date());
 
@@ -360,6 +367,22 @@ function rebuild() {
 function writeDashboard_(rows, cfg, todayIso) {
   var sh = sheet_(TABS.dashboard);
   sh.clear();
+
+  // Nothing to project yet.  Say so plainly instead of dying on rows[0].
+  if (!rows.length) {
+    sh.getRange(1, 1, 4, 1).setValues([
+      [String(cfg.displayName || 'Leave Planner')],
+      ['Not set up yet.'],
+      ['Enter your PTOB balance in the Config tab as anchorBalance — the '
+       + 'balance you had on the anchorSunday date above it.'],
+      ['Then run Leave Planner \u2192 Refresh balances from the menu.'],
+    ]);
+    sh.getRange(1, 1).setFontSize(14).setFontWeight('bold');
+    sh.getRange(2, 1).setFontWeight('bold');
+    sh.getRange(3, 1, 2, 1).setFontColor(THEME.muted);
+    autosize_(sh, 1);
+    return;
+  }
 
   // current = the last period Sunday on or before today
   var current = rows[0];

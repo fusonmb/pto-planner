@@ -120,6 +120,50 @@ check("registry rules fall back to the app's hardcoded values", () => {
     throw new Error(`registry rules ${JSON.stringify(r)} != defaults ${JSON.stringify(d)}`);
 });
 
+/* ------------------------------------------- unconfigured Sheet */
+/* setup() ends by calling refresh(), which ran the date helpers over the
+   blank Config cells it had just written: isoOf_(parseIso_("")) throws
+   RangeError, so setup() died on a brand-new Sheet and writeDashboard_
+   then indexed rows[0] of an empty projection. */
+
+check("a blank hire date does not throw", () => {
+  const hire = "" ? gas.isoOf_(gas.parseIso_("")) : null;
+  if (hire !== null) throw new Error(`expected null, got ${hire}`);
+  // and the raw helper still throws, which is why refresh() must guard it
+  let threw = false;
+  try { gas.isoOf_(gas.parseIso_("")); } catch (e) { threw = true; }
+  if (!threw) throw new Error("parseIso_('') unexpectedly became valid");
+});
+
+check("an unconfigured Sheet projects nothing, in both engines", () => {
+  const g = gas.computeProjection_({}, "2026-08-20", null, NaN, null, null);
+  const a = app.computeProjection({}, "2026-08-20", null, NaN, null, null);
+  if (g.length !== 0 || a.length !== 0)
+    throw new Error(`expected no rows, got Code.gs=${g.length} app=${a.length}`);
+});
+
+check("an anchor date with no balance is ignored, not seeded at zero", () => {
+  const g = gas.computeProjection_({}, "2026-08-20", "2026-07-26", NaN, null, null);
+  if (g.length !== 0)
+    throw new Error(`projected ${g.length} rows from a missing balance`);
+});
+
+check("no hire date means the step-up never applies", () => {
+  const g = gas.computeProjection_({}, "2028-06-01", "2026-07-26", 135.92, null, null);
+  const a = app.computeProjection({}, "2028-06-01", "2026-07-26", 135.92, null, null);
+  if (!g.length) throw new Error("expected rows");
+  if (g.length !== a.length)
+    throw new Error(`row count ${g.length} != ${a.length}`);
+  for (let i = 0; i < g.length; i++) {
+    if (g[i].cap !== a[i].cap)
+      throw new Error(`row ${i} cap ${g[i].cap} != ${a[i].cap}`);
+    if (Math.abs(g[i].balance - a[i].balance) > 1e-9)
+      throw new Error(`row ${i} balance ${g[i].balance} != ${a[i].balance}`);
+  }
+  if (g.some(r => r.cap !== 240))
+    throw new Error("cap stepped up without a hire date");
+});
+
 console.log(`\n${pass} passed, ${failures.length} failed`);
 if (failures.length) {
   console.log("\nFAILURES:");
