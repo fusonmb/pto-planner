@@ -196,6 +196,49 @@ check("a cleared plan is not resurrected from a stale browser copy", () => {
      "an intentionally emptied Sheet with an empty browser stays empty");
 });
 
+/* ------------------------------------------------------ config.js */
+/* The deployed page loads config.js with onerror="__noSheetConfig = true",
+   which only catches a 404 -- a syntax error or a renamed field fails
+   silently and drops the live site back to localStorage with no warning.
+   These assert the committed file really does configure the store. */
+
+check("config.js exists and is committed", () => {
+  const fs = require("fs"), path = require("path");
+  const p = path.join(__dirname, "..", "config.js");
+  ok(fs.existsSync(p), "config.js is missing — the deployed app stays local");
+});
+
+check("config.js configures the store", () => {
+  const fs = require("fs"), path = require("path"), vm = require("vm");
+  const src = fs.readFileSync(path.join(__dirname, "..", "config.js"), "utf8");
+  let called = null;
+  const sandbox = { LeaveStore: { configure: (o) => { called = o; } }, console };
+  vm.createContext(sandbox);
+  vm.runInContext(src, sandbox, { filename: "config.js" });
+  ok(called, "config.js never called LeaveStore.configure()");
+  ok(called.clientId && /\.apps\.googleusercontent\.com$/.test(called.clientId),
+     `clientId looks wrong: ${called.clientId}`);
+  ok(called.apiKey && called.apiKey.length > 20,
+     `apiKey looks wrong: ${called.apiKey}`);
+  eq(called.fileName, "Leave Planner", "fileName");
+});
+
+check("config.js leaves the store reporting configured", () => {
+  const fs = require("fs"), path = require("path"), vm = require("vm");
+  const src = fs.readFileSync(path.join(__dirname, "..", "config.js"), "utf8");
+  const sandbox = { LeaveStore: S, console };
+  vm.createContext(sandbox);
+  vm.runInContext(src, sandbox, { filename: "config.js" });
+  ok(S.configured(), "store still reports unconfigured after config.js ran");
+});
+
+check("no client secret was pasted into config.js", () => {
+  const fs = require("fs"), path = require("path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "config.js"), "utf8");
+  ok(!/client_?secret/i.test(src), "config.js mentions a client secret");
+  ok(!/GOCSPX-/.test(src), "config.js contains a Google client secret");
+});
+
 console.log(`\n${pass} passed, ${failures.length} failed`);
 if (failures.length) {
   console.log("\nFAILURES:");
