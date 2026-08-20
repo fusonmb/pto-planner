@@ -297,6 +297,42 @@ asyncCheck("pickShared loads the picker instead of giving up", async () => {
     throw new Error("pickShared still bails instead of loading the picker");
 });
 
+/* ------------------------------------------------ picker app id */
+/* The Picker grants drive.file access to a picked file only when it knows
+   the app id (the Cloud project number).  Without setAppId the pick looked
+   fine and granted nothing, so files.get came back 404 -- indistinguishable
+   from "you never picked it". */
+
+check("the app id is derived from the client id", () => {
+  eq(I.appId(), "831104318690", "app id");
+});
+
+asyncCheck("the picker is told the app id", async () => {
+  const seen = { appId: null, token: null, key: null };
+  const chain = {
+    setOAuthToken: (t) => { seen.token = t; return chain; },
+    setDeveloperKey: (k) => { seen.key = k; return chain; },
+    addView: () => chain,
+    setAppId: (a) => { seen.appId = a; return chain; },
+    setCallback: (cb) => { chain._cb = cb; return chain; },
+    build: () => ({ setVisible: () => { chain._cb({ action: "cancel" }); } }),
+  };
+  const view = { setIncludeFolders: () => view, setSelectFolderEnabled: () => view };
+  global.window.google = { picker: {
+    ViewId: { SPREADSHEETS: "ss" },
+    DocsView: function () { return view; },
+    Action: { PICKED: "picked", CANCEL: "cancel" },
+    PickerBuilder: function () { return chain; },
+  } };
+  global.google = global.window.google;
+  await I.pickFrom().then(() => {}, () => {});      // cancelled; we want the config
+  if (!seen.appId)
+    throw new Error("PickerBuilder.setAppId was never called");
+  if (seen.appId !== "831104318690")
+    throw new Error(`setAppId("${seen.appId}"), expected the project number`);
+  if (!seen.key) throw new Error("developer key not set");
+});
+
 /* ---------------------------------------------- sign-in never hangs */
 /* GIS reports a blocked or closed popup on error_callback, not callback.
    Only callback was wired, so a blocked popup left the promise forever
@@ -407,8 +443,8 @@ asyncCheck("loadPicker gives up if gapi never arrives", async () => {
 });
 
 runQueued().then((ran) => {
-if (ran !== 11) {
-  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 11`);
+if (ran !== 12) {
+  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 12`);
   process.exit(1);
 }
 console.log(`\n${pass} passed, ${failures.length} failed`);

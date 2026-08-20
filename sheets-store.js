@@ -31,6 +31,7 @@ var LeaveStore = (function () {
   var FILE_NAME = "Leave Planner";
   var STORE_KEY = "leavePlannerData";
   var FILE_ID_KEY = "leavePlannerFileId";
+  var APP_ID = null;             // defaults to the client id prefix
 
   var SHEETS = "https://sheets.googleapis.com/v4/spreadsheets";
   var DRIVE = "https://www.googleapis.com/drive/v3";
@@ -292,13 +293,30 @@ var LeaveStore = (function () {
     return loadPicker().then(function () { return pickFrom(); });
   }
 
+  /**
+   * The Picker only ties its grant to *this* app when it is told the app id
+   * (the Cloud project number).  Without it the pick appears to succeed and
+   * grants nothing, so the drive.file scope still cannot open the file and
+   * the follow-up files.get returns a bare 404 -- which is exactly what a
+   * hand-made Sheet looked like.  The project number is the numeric prefix
+   * of the OAuth client id, so it never has to be configured separately.
+   */
+  function appId() {
+    if (APP_ID) return APP_ID;
+    var m = /^(\d+)-/.exec(CLIENT_ID || "");
+    return m ? m[1] : null;
+  }
+
   function pickFrom() {
     return new Promise(function (resolve, reject) {
       var view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS)
         .setIncludeFolders(false).setSelectFolderEnabled(false);
-      new google.picker.PickerBuilder()
+      var builder = new google.picker.PickerBuilder()
         .setOAuthToken(state.token).setDeveloperKey(API_KEY)
-        .addView(view)
+        .addView(view);
+      var app = appId();
+      if (app) builder.setAppId(app);
+      builder
         .setCallback(function (d) {
           if (d.action === google.picker.Action.PICKED) {
             resolve(useFile(d.docs[0].id));
@@ -639,6 +657,7 @@ var LeaveStore = (function () {
       CLIENT_ID = o.clientId || CLIENT_ID;
       API_KEY = o.apiKey || API_KEY;
       FILE_NAME = o.fileName || FILE_NAME;
+      APP_ID = o.appId || APP_ID;
     },
     onStatus: function (fn) { state.onStatus = fn; },
     connect: connect,
@@ -659,6 +678,7 @@ var LeaveStore = (function () {
                   useFile: useFile, openOwn: openOwn,
                   forgetFile: forgetFile, rememberedFile: rememberedFile,
                   resetAuth: function () { tokenClient = null; pendingAuth = null; },
+                  appId: appId, pickFrom: pickFrom,
                   needsSeeding: needsSeeding },
   };
 })();
