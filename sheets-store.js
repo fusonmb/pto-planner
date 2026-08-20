@@ -167,6 +167,23 @@ var LeaveStore = (function () {
     });
   }
 
+  /**
+   * Reuse an existing grant before asking for anything.  prompt:"consent"
+   * re-shows the whole permission screen even when the user granted it long
+   * ago, so an explicit click used to mean clicking through Google every
+   * single time.  Try silently first and only escalate when the quiet
+   * attempt says interaction is genuinely required -- never after the user
+   * has just closed the popup themselves, which would reopen it in their
+   * face.
+   */
+  function authenticate(opts) {
+    if (opts.silent) return signIn({ silent: true });
+    return signIn({ silent: true }).catch(function (err) {
+      if (/closed before it finished/i.test(err.message)) throw err;
+      return signIn({ silent: false });
+    });
+  }
+
   function signOut() {
     if (state.token && window.google && google.accounts) {
       google.accounts.oauth2.revoke(state.token, function () {});
@@ -647,7 +664,7 @@ var LeaveStore = (function () {
       return Promise.reject(new Error(
         "Google Sheets is not configured — add config.js with a client ID."));
     }
-    return signIn({ silent: opts.silent })
+    return authenticate(opts)
       .then(function () { return opts.pick ? pickShared() : openOwn(); })
       .then(hydrate);
   }
@@ -679,6 +696,7 @@ var LeaveStore = (function () {
                   forgetFile: forgetFile, rememberedFile: rememberedFile,
                   resetAuth: function () { tokenClient = null; pendingAuth = null; },
                   appId: appId, pickFrom: pickFrom,
+                  authenticate: authenticate,
                   needsSeeding: needsSeeding },
   };
 })();

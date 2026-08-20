@@ -297,6 +297,57 @@ asyncCheck("pickShared loads the picker instead of giving up", async () => {
     throw new Error("pickShared still bails instead of loading the picker");
 });
 
+/* ------------------------------------------ consent is not re-asked */
+
+/* Records the prompt value of every requestAccessToken call. */
+function mockGisSeq(outcomes) {
+  I.resetAuth();
+  const prompts = [];
+  let cfg = null, n = 0;
+  const g = { accounts: { oauth2: {
+    initTokenClient: (c) => { cfg = c; return {
+      requestAccessToken: (o) => {
+        prompts.push(o && o.prompt);
+        const out = outcomes[Math.min(n++, outcomes.length - 1)];
+        out(cfg);
+      },
+    }; },
+    revoke: () => {},
+  } } };
+  global.window.google = g; global.google = g;
+  return prompts;
+}
+const grant = (cfg) => cfg.callback({ access_token: "tok" });
+const needsUi = (cfg) => cfg.error_callback({ type: "unknown" });
+const userClosed = (cfg) => cfg.error_callback({ type: "popup_closed" });
+
+asyncCheck("an existing grant is reused without a consent screen", async () => {
+  const prompts = mockGisSeq([grant]);
+  await I.authenticate({});
+  eq(prompts, [""], "prompts used");
+  if (prompts.indexOf("consent") >= 0)
+    throw new Error("re-asked for consent despite an existing grant");
+});
+
+asyncCheck("consent is asked for only when the quiet attempt fails", async () => {
+  const prompts = mockGisSeq([needsUi, grant]);
+  await I.authenticate({});
+  eq(prompts, ["", "consent"], "prompts used");
+});
+
+asyncCheck("closing the popup does not reopen it", async () => {
+  const prompts = mockGisSeq([userClosed]);
+  await I.authenticate({}).then(() => { throw new Error("should have failed"); },
+                                () => {});
+  eq(prompts, [""], "prompts used");
+});
+
+asyncCheck("a silent reconnect never escalates", async () => {
+  const prompts = mockGisSeq([needsUi]);
+  await I.authenticate({ silent: true }).then(() => {}, () => {});
+  eq(prompts, [""], "prompts used");
+});
+
 /* ------------------------------------------------ picker app id */
 /* The Picker grants drive.file access to a picked file only when it knows
    the app id (the Cloud project number).  Without setAppId the pick looked
@@ -443,8 +494,8 @@ asyncCheck("loadPicker gives up if gapi never arrives", async () => {
 });
 
 runQueued().then((ran) => {
-if (ran !== 12) {
-  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 12`);
+if (ran !== 16) {
+  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 16`);
   process.exit(1);
 }
 console.log(`\n${pass} passed, ${failures.length} failed`);
