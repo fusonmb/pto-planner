@@ -1452,8 +1452,53 @@ function initSync() {
     STORE.signOut();
     await refresh();
   });
+  initCrossTab();
+  initPullOnFocus();
   // returning users are reconnected without a prompt
   syncConnect({silent: true});
+}
+
+/* Another tab in this browser saved.  localStorage fires `storage` only in
+   the *other* tabs, never the one that wrote, so this cannot loop.  No
+   network involved -- the data is already sitting in localStorage. */
+function initCrossTab() {
+  window.addEventListener("storage", (e) => {
+    if (e.key !== STORE.storeKey() || e.newValue === null) return;
+    if (STORE.isDirty()) {                  // don't stamp on unsaved edits
+      syncBar("info", "Another tab saved — reload to see it.");
+      return;
+    }
+    fetchState();
+    renderTiles(); renderCalendar(); renderChart(); renderHire();
+    syncBar("info", "Updated from another tab.");
+  });
+}
+
+/* Drive push notifications need a server to receive them and this app is
+   static files, so the Sheet is pulled instead -- when the tab is actually
+   looked at, which is when a stale number would matter. One small Drive
+   field, no background polling. */
+function initPullOnFocus() {
+  let busy = false;
+  const check = async () => {
+    if (busy || document.hidden || !STORE.isSheet()) return;
+    busy = true;
+    try {
+      const r = await STORE.pull();
+      if (r.state === "pulled") {
+        await refresh();
+      } else if (r.state === "conflict") {
+        syncBar("error", "The Sheet changed elsewhere, and this tab has "
+                       + "unsaved edits. Save or reload to resolve.");
+      }
+    } catch (err) {
+      // a failed check is not worth a banner; the next look tries again
+    } finally {
+      busy = false;
+    }
+  };
+  document.addEventListener("visibilitychange", check);
+  window.addEventListener("focus", check);
 }
 
 /* A pending Sheet write must not be lost to a closing tab. */

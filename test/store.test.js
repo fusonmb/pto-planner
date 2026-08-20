@@ -297,6 +297,80 @@ asyncCheck("pickShared loads the picker instead of giving up", async () => {
     throw new Error("pickShared still bails instead of loading the picker");
 });
 
+/* ------------------------------------------------- pulling changes */
+/* Drive cannot push to a static site, so the Sheet is polled when the tab is
+   looked at.  The rule that matters: a pull must never overwrite edits that
+   exist only in this browser. */
+
+async function connectedStore(revision, opts) {
+  opts = opts || {};
+  I.resetAuth();
+  mockGisSeq([grant]);
+  I.forgetFile();
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.indexOf("/files/") >= 0 && u.indexOf("headRevisionId") >= 0
+        && u.indexOf("capabilities") < 0) {
+      return { status: 200, ok: true,
+               json: async () => ({ headRevisionId: opts.remote || revision }) };
+    }
+    if (u.indexOf("/files/") >= 0 && u.indexOf("capabilities") >= 0) {
+      return { status: 200, ok: true,
+               json: async () => ({ id: "f1", name: "Leave Planner",
+                                    headRevisionId: revision,
+                                    capabilities: { canEdit: true } }) };
+    }
+    if (u.indexOf("/files?q=") >= 0) {
+      return { status: 200, ok: true,
+               json: async () => ({ files: [{ id: "f1", name: "Leave Planner" }] }) };
+    }
+    return { status: 200, ok: true, json: async () => ({ valueRanges: [] }) };
+  };
+  await I.useFile("f1");
+  return S;
+}
+
+asyncCheck("an unmoved Sheet reports unchanged and does nothing", async () => {
+  await connectedStore("rev-1");
+  const r = await S.pollRemote();
+  eq(r.state, "unchanged", "poll state");
+  const p = await S.pull();
+  eq(p.state, "unchanged", "pull state");
+});
+
+asyncCheck("a moved Sheet is reported as changed", async () => {
+  await connectedStore("rev-1", { remote: "rev-2" });
+  const r = await S.pollRemote();
+  eq(r.state, "changed", "poll state");
+});
+
+asyncCheck("unsaved local edits turn a move into a conflict", async () => {
+  await connectedStore("rev-1", { remote: "rev-2" });
+  const d = I.emptyData();
+  d.entries["2026-09-01"] = { b: 8, nr: 0, label: "mine" };
+  S.write(d);                                    // marks dirty
+  const r = await S.pollRemote();
+  eq(r.state, "conflict", "poll state");
+});
+
+asyncCheck("a pull refuses to discard unsaved edits", async () => {
+  await connectedStore("rev-1", { remote: "rev-2" });
+  const d = I.emptyData();
+  d.entries["2026-09-01"] = { b: 8, nr: 0, label: "mine" };
+  S.write(d);
+  const p = await S.pull();
+  if (p.state === "pulled")
+    throw new Error("pulled over unsaved local edits");
+  eq(p.state, "conflict", "pull state");
+});
+
+asyncCheck("pollRemote is inert when not connected to a Sheet", async () => {
+  I.resetAuth();
+  S.signOut();
+  const r = await S.pollRemote();
+  eq(r.state, "local", "poll state");
+});
+
 /* ------------------------------------------ consent is not re-asked */
 
 /* Records the prompt value of every requestAccessToken call. */
@@ -494,8 +568,8 @@ asyncCheck("loadPicker gives up if gapi never arrives", async () => {
 });
 
 runQueued().then((ran) => {
-if (ran !== 16) {
-  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 16`);
+if (ran !== 21) {
+  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 21`);
   process.exit(1);
 }
 console.log(`\n${pass} passed, ${failures.length} failed`);

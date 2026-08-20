@@ -509,6 +509,57 @@ var LeaveStore = (function () {
     }
   }
 
+  // ------------------------------------------------------------ pulling
+
+  /**
+   * Has the Sheet moved since this tab last read it?
+   *
+   * Drive can push change notifications, but only to a public HTTPS endpoint
+   * it can call -- a server.  This app is static files on GitHub Pages, so
+   * there is nothing to push to and pulling is the only option.  One Drive
+   * field is cheap enough to ask for whenever the tab is looked at.
+   *
+   * Resolves to one of:
+   *   local     -- not connected to a Sheet at all
+   *   unchanged -- the Sheet is exactly where we left it
+   *   changed   -- the Sheet moved and this tab has nothing unsaved
+   *   conflict  -- the Sheet moved AND this tab has unsaved edits
+   */
+  function pollRemote() {
+    if (state.mode !== "sheet" || !state.fileId) {
+      return Promise.resolve({ state: "local" });
+    }
+    return api(DRIVE + "/files/" + state.fileId + "?fields=headRevisionId")
+      .then(function (m) {
+        var rev = m.headRevisionId || null;
+        if (!rev || rev === state.revision) return { state: "unchanged" };
+        if (state.dirty || state.pending) {
+          return { state: "conflict", revision: rev };
+        }
+        return { state: "changed", revision: rev };
+      });
+  }
+
+  /**
+   * Re-read the Sheet if it has moved.  Refuses by default when this tab has
+   * unsaved edits: overwriting them would lose work that exists nowhere
+   * else.  force:true is the user answering "yes, discard mine".
+   */
+  function pull(opts) {
+    opts = opts || {};
+    return pollRemote().then(function (r) {
+      var may = r.state === "changed" || (opts.force && r.state === "conflict");
+      if (!may) return r;
+      if (opts.force) state.dirty = false;   // deliberately discarding
+      return hydrate()
+        .then(refreshRevision)
+        .then(function () {
+          log("info", "Updated from the Sheet.");
+          return { state: "pulled" };
+        });
+    });
+  }
+
   // ----------------------------------------------------------------- write
 
   function refreshRevision() {
@@ -680,10 +731,14 @@ var LeaveStore = (function () {
     connect: connect,
     signOut: signOut,
     hydrate: hydrate,
+    pollRemote: pollRemote,
+    pull: pull,
     read: read,
     write: write,
     flush: flush,
     isSheet: function () { return state.mode === "sheet"; },
+    storeKey: function () { return STORE_KEY; },
+    isDirty: function () { return !!(state.dirty || state.pending); },
     canEdit: function () { return state.canEdit; },
     configured: configured,
     // exposed for tests
