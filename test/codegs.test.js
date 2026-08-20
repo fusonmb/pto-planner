@@ -177,6 +177,17 @@ function mockSheets() {
     get: () => chain,
     apply: () => chain,
   });
+  const charts = [];
+  const inserted = [];
+  const removed = [];
+  const chartCalls = { ranges: [], options: {}, position: null, type: null };
+  const builder = {
+    setChartType: (t) => { chartCalls.type = t; return builder; },
+    addRange: (r) => { chartCalls.ranges.push(r); return builder; },
+    setPosition: (...a) => { chartCalls.position = a; return builder; },
+    setOption: (k, v) => { chartCalls.options[k] = v; return builder; },
+    build: () => ({ __chart: true, calls: chartCalls }),
+  };
   const sheet = {
     clear: () => sheet,
     setFrozenRows: () => sheet,
@@ -185,7 +196,13 @@ function mockSheets() {
     getLastRow: () => 0,
     getLastColumn: () => 0,
     getMaxColumns: () => 26,
+    newChart: () => builder,
+    getCharts: () => charts.slice(),
+    insertChart: (c) => { inserted.push(c); charts.push(c); },
+    removeChart: (c) => { removed.push(c); const i = charts.indexOf(c);
+                          if (i >= 0) charts.splice(i, 1); },
     getRange: (row, col, nRows, nCols) => ({
+      __geom: { row, col, nRows: nRows || 1, nCols: nCols || 1 },
       setValues: (data) => {
         writes.push({ row, col, nRows: nRows || 1, nCols: nCols || 1, data });
         return chain;
@@ -201,6 +218,8 @@ function mockSheets() {
   global.SpreadsheetApp = {
     getActive: () => ({ getSheetByName: () => sheet, getSheets: () => [sheet] }),
   };
+  global.Charts = { ChartType: { LINE: "LINE", COLUMN: "COLUMN" } };
+  writes.charts = { inserted, removed, calls: chartCalls, live: charts };
   return writes;
 }
 
@@ -250,6 +269,88 @@ check("the Dashboard reports the balance as of today, not the anchor", () => {
   if (!line) throw new Error("no Current PTOB line");
   if (line[2] !== "as of 2026-08-09")
     throw new Error(`expected the 2026-08-09 row, got "${line[2]}"`);
+});
+
+/* ------------------------------------------------ Dashboard chart */
+
+check("a populated Dashboard gets exactly one chart", () => {
+  const writes = mockSheets();
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
+                                      "2018-11-13", "2026-08-14");
+  gas.writeDashboard_(rows, { displayName: "Leave Planner",
+                              childBirthDate: "2026-08-14" }, "2026-08-20");
+  const c = writes.charts;
+  if (c.inserted.length !== 1)
+    throw new Error(`inserted ${c.inserted.length} charts, want 1`);
+  if (c.calls.type !== "LINE")
+    throw new Error(`chart type ${c.calls.type}`);
+});
+
+check("refreshing does not stack charts", () => {
+  const writes = mockSheets();
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
+                                      null, null);
+  const cfg = { displayName: "Leave Planner" };
+  gas.writeDashboard_(rows, cfg, "2026-08-20");
+  gas.writeDashboard_(rows, cfg, "2026-08-20");
+  gas.writeDashboard_(rows, cfg, "2026-08-20");
+  const c = writes.charts;
+  if (c.live.length !== 1)
+    throw new Error(`${c.live.length} charts left on the sheet after 3 refreshes`);
+  if (c.removed.length !== 2)
+    throw new Error(`removed ${c.removed.length}, expected 2`);
+});
+
+check("the chart plots the balance, cap and parental columns", () => {
+  const writes = mockSheets();
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
+                                      null, "2026-08-14");
+  gas.writeDashboard_(rows, { displayName: "Leave Planner",
+                              childBirthDate: "2026-08-14" }, "2026-08-20");
+  const g = writes.charts.calls.ranges.map(r => r.__geom);
+  if (g.length !== 3)
+    throw new Error(`${g.length} ranges, expected date + balance/cap + parental`);
+  if (g[0].col !== 1 || g[0].nCols !== 1)
+    throw new Error(`domain range is col ${g[0].col} x${g[0].nCols}, want col 1 x1`);
+  if (g[1].col !== 5 || g[1].nCols !== 2)
+    throw new Error(`series range is col ${g[1].col} x${g[1].nCols}, want col 5 x2`);
+  if (g[2].col !== 8 || g[2].nCols !== 1)
+    throw new Error(`parental range is col ${g[2].col} x${g[2].nCols}, want col 8 x1`);
+  const rowsWanted = rows.length + 1;      // body + header
+  g.forEach((x, i) => {
+    if (x.nRows !== rowsWanted)
+      throw new Error(`range ${i} covers ${x.nRows} rows, want ${rowsWanted}`);
+  });
+});
+
+check("no birth date means no parental series", () => {
+  const writes = mockSheets();
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
+                                      null, null);
+  gas.writeDashboard_(rows, { displayName: "Leave Planner" }, "2026-08-20");
+  const c = writes.charts.calls;
+  if (c.ranges.length !== 2)
+    throw new Error(`${c.ranges.length} ranges, expected 2 without parental`);
+  if (c.options.series[2])
+    throw new Error("a parental series was styled with no birth date");
+});
+
+check("the chart is anchored clear of the table", () => {
+  const writes = mockSheets();
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
+                                      null, null);
+  gas.writeDashboard_(rows, { displayName: "Leave Planner" }, "2026-08-20");
+  const pos = writes.charts.calls.position;
+  if (!pos) throw new Error("no position set");
+  if (pos[1] <= 8)
+    throw new Error(`chart anchored at column ${pos[1]}, which overlaps the 8-column table`);
+});
+
+check("an unconfigured Dashboard carries no chart", () => {
+  const writes = mockSheets();
+  gas.writeDashboard_([], { displayName: "Leave Planner" }, "2026-08-20");
+  if (writes.charts.inserted.length !== 0)
+    throw new Error("charted an empty projection");
 });
 
 console.log(`\n${pass} passed, ${failures.length} failed`);

@@ -33,6 +33,8 @@ var TABS = {
 };
 
 var PERIOD_DAYS = 14;
+// Dashboard projection table width, so the chart can be anchored clear of it
+var DASH_COLS = 8;
 var PROJECTION_MONTHS = 36;
 
 // Fixed columns on the Leave tab.  Everything between Date and Label is one
@@ -364,6 +366,48 @@ function rebuild() {
   refresh();
 }
 
+/**
+ * Rebuild the Dashboard's projection chart: PTOB balance and the cap it is
+ * climbing towards, plus parental remaining while that is in play.  Mirrors
+ * the web app's chart — green PTOB, pink parental, dashed cap.
+ *
+ * sh.clear() does NOT remove embedded charts, so any existing one has to be
+ * dropped explicitly or a chart is added on every single refresh.
+ */
+function drawChart_(sh, headerRow, bodyRows, hasParental) {
+  var existing = sh.getCharts();
+  for (var i = 0; i < existing.length; i++) sh.removeChart(existing[i]);
+  if (!bodyRows) return;
+
+  var n = bodyRows + 1;                 // include the header row for labels
+  var series = {
+    0: { color: THEME.ptob, lineWidth: 3 },
+    1: { color: THEME.muted, lineWidth: 1, lineDashStyle: [6, 4] },
+  };
+  var builder = sh.newChart()
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(sh.getRange(headerRow, 1, n, 1))    // Period Sunday
+    .addRange(sh.getRange(headerRow, 5, n, 2));   // PTOB balance, Cap
+
+  if (hasParental) {
+    builder.addRange(sh.getRange(headerRow, 8, n, 1));   // Parental left
+    series[2] = { color: THEME.parental, lineWidth: 2 };
+  }
+
+  sh.insertChart(builder
+    .setPosition(1, DASH_COLS + 2, 0, 0)
+    .setOption('title', 'Projected balances')
+    .setOption('useFirstColumnAsDomain', true)
+    .setOption('width', 780)
+    .setOption('height', 440)
+    .setOption('legend', { position: 'bottom' })
+    .setOption('series', series)
+    .setOption('hAxis', { slantedText: true, slantedTextAngle: 45 })
+    .setOption('vAxis', { title: 'Hours', minValue: 0 })
+    .setOption('backgroundColor', '#ffffff')
+    .build());
+}
+
 function writeDashboard_(rows, cfg, todayIso) {
   var sh = sheet_(TABS.dashboard);
   sh.clear();
@@ -381,6 +425,7 @@ function writeDashboard_(rows, cfg, todayIso) {
     sh.getRange(2, 1).setFontWeight('bold');
     sh.getRange(3, 1, 2, 1).setFontColor(THEME.muted);
     autosize_(sh, 1);
+    drawChart_(sh, 0, 0, false);          // nothing to plot; clear any stale chart
     return;
   }
 
@@ -431,6 +476,8 @@ function writeDashboard_(rows, cfg, todayIso) {
   }
   sh.setFrozenRows(top);
   autosize_(sh, cols.length);
+  drawChart_(sh, top, body.length,
+             rows.some(function (r) { return r.nrRemaining !== null; }));
 }
 
 // ============================================================
@@ -636,5 +683,6 @@ if (typeof module !== 'undefined' && module.exports) {
     defaultRules_: defaultRules_,
     rulesFromTypes_: rulesFromTypes_,
     writeDashboard_: writeDashboard_,
+    drawChart_: drawChart_,
   };
 }
