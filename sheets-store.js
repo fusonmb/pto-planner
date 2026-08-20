@@ -738,6 +738,7 @@ var LeaveStore = (function () {
     flush: flush,
     isSheet: function () { return state.mode === "sheet"; },
     storeKey: function () { return STORE_KEY; },
+    hasRememberedSheet: function () { return !!rememberedFile(); },
     isDirty: function () { return !!(state.dirty || state.pending); },
     canEdit: function () { return state.canEdit; },
     configured: configured,

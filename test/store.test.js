@@ -297,6 +297,27 @@ asyncCheck("pickShared loads the picker instead of giving up", async () => {
     throw new Error("pickShared still bails instead of loading the picker");
 });
 
+/* --------------------------------------- knowing whether to expect a Sheet */
+
+asyncCheck("no remembered Sheet before ever connecting", async () => {
+  I.forgetFile();
+  if (S.hasRememberedSheet())
+    throw new Error("claims a Sheet with nothing remembered");
+});
+
+asyncCheck("a Sheet is remembered once one opens successfully", async () => {
+  I.forgetFile();
+  global.fetch = async () => ({
+    status: 200, ok: true,
+    json: async () => ({ id: "f9", name: "Leave Planner",
+                         headRevisionId: "r1",
+                         capabilities: { canEdit: true } }),
+  });
+  await I.useFile("f9");
+  if (!S.hasRememberedSheet())
+    throw new Error("did not remember a Sheet that opened fine");
+});
+
 /* ------------------------------------------------- pulling changes */
 /* Drive cannot push to a static site, so the Sheet is polled when the tab is
    looked at.  The rule that matters: a pull must never overwrite edits that
@@ -568,8 +589,8 @@ asyncCheck("loadPicker gives up if gapi never arrives", async () => {
 });
 
 runQueued().then((ran) => {
-if (ran !== 21) {
-  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 21`);
+if (ran !== 23) {
+  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 23`);
   process.exit(1);
 }
 console.log(`\n${pass} passed, ${failures.length} failed`);

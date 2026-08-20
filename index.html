@@ -1428,9 +1428,18 @@ async function syncConnect(opts) {
     await refresh();
     applyReadOnly();
   } catch (err) {
-    // a silent reconnect that fails just means "stay local" -- only an
-    // explicit click deserves a banner
-    if (opts.silent) return;
+    if (opts.silent) {
+      // A silent reconnect fails routinely -- no Google session in this
+      // browser yet, or a phone that has cleared it.  Staying quiet was
+      // wrong for anyone who HAS connected before: the page then showed a
+      // stale local copy with nothing to say it was not the Sheet.  Say so
+      // once, quietly, and only when a Sheet was expected.
+      if (STORE.hasRememberedSheet()) {
+        syncBar("info", "Showing this browser's copy — tap Google Sheets to "
+                      + "sync with the Sheet.");
+      }
+      return;
+    }
     syncBar("error", err.message);
   }
 }
@@ -1499,6 +1508,10 @@ function initPullOnFocus() {
   };
   document.addEventListener("visibilitychange", check);
   window.addEventListener("focus", check);
+  // A phone returning to a backgrounded tab often restores it from the
+  // back/forward cache without re-running any of this file, so a plain load
+  // handler would never fire.
+  window.addEventListener("pageshow", (e) => { if (e.persisted) check(); });
 }
 
 /* A pending Sheet write must not be lost to a closing tab. */
