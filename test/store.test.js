@@ -239,9 +239,96 @@ check("no client secret was pasted into config.js", () => {
   ok(!/GOCSPX-/.test(src), "config.js contains a Google client secret");
 });
 
+/* ------------------------------------------------- Picker loading */
+/* api.js defines gapi but NOT google.picker -- that module only appears after
+   gapi.load("picker").  Nothing called it, so pickShared() rejected with
+   "Google Picker is not loaded." every time and Pick a Sheet never opened. */
+
+/* These share global.window, so they must run one at a time, not raced --
+   and the runner has to start AFTER the queue is filled, or it silently
+   reports success having executed nothing. */
+const queued = [];
+const asyncCheck = (name, fn) => queued.push([name, fn]);
+const runQueued = async () => {
+  for (const [name, fn] of queued) {
+    try { await fn(); pass++; }
+    catch (e) { failures.push(`${name}\n    ${e.message}`); }
+  }
+  return queued.length;
+};
+
+asyncCheck("loadPicker resolves when the picker is already there", async () => {
+  global.window.google = { picker: {} };
+  delete global.window.gapi;
+  await I.loadPicker();
+});
+
+asyncCheck("loadPicker pulls in the picker module via gapi", async () => {
+  delete global.window.google;
+  let askedFor = null;
+  global.window.gapi = {
+    load: (name, cb) => {
+      askedFor = name;
+      global.window.google = { picker: {} };     // what gapi.load really does
+      cb.callback();
+    },
+  };
+  await I.loadPicker();
+  if (askedFor !== "picker")
+    throw new Error(`gapi.load("${askedFor}"), expected "picker"`);
+  if (!global.window.google.picker)
+    throw new Error("resolved without google.picker");
+});
+
+asyncCheck("pickShared loads the picker instead of giving up", async () => {
+  // the regression itself: picker absent, but gapi can supply it
+  delete global.window.google;
+  global.window.gapi = {
+    load: (n, cb) => {
+      global.window.google = { picker: {} };   // present but not usable
+      cb.callback();
+    },
+  };
+  let msg = null;
+  await I.pickShared().then(() => {}, (e) => { msg = e.message; });
+  // it must get PAST the availability check -- whatever it fails on next,
+  // it must not be "Google Picker is not loaded."
+  if (msg && /picker is not loaded/i.test(msg))
+    throw new Error("pickShared still bails instead of loading the picker");
+});
+
+asyncCheck("loadPicker surfaces a gapi.load failure", async () => {
+  delete global.window.google;
+  global.window.gapi = { load: (n, cb) => cb.onerror() };
+  let msg = null;
+  await I.loadPicker().then(() => {}, (e) => { msg = e.message; });
+  if (!msg || !/failed to load/i.test(msg))
+    throw new Error(`unhelpful error: ${msg}`);
+});
+
+asyncCheck("loadPicker gives up if gapi never arrives", async () => {
+  delete global.window.google;
+  delete global.window.gapi;
+  const realTimeout = global.setTimeout;
+  global.setTimeout = (fn) => realTimeout(fn, 0);   // collapse the wait
+  let msg = null;
+  await I.loadPicker().then(() => {}, (e) => { msg = e.message; });
+  global.setTimeout = realTimeout;
+  if (!msg || !/did not load/i.test(msg))
+    throw new Error(`unhelpful timeout error: ${msg}`);
+  if (!/script blocker/i.test(msg))
+    throw new Error("timeout error does not suggest what to check");
+});
+
+runQueued().then((ran) => {
+if (ran !== 5) {
+  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 5`);
+  process.exit(1);
+}
 console.log(`\n${pass} passed, ${failures.length} failed`);
 if (failures.length) {
   console.log("\nFAILURES:");
   for (const f of failures) console.log("  - " + f);
   process.exit(1);
 }
+});

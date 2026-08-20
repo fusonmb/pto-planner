@@ -25,6 +25,8 @@ var LeaveStore = (function () {
   var CLIENT_ID = "";      // set in config.js, or left blank for local-only
   var API_KEY = "";
   var SCOPE = "https://www.googleapis.com/auth/drive.file";
+  var PICKER_POLL_MS = 100;      // gapi arrives async; poll for it
+  var PICKER_TIMEOUT_MS = 10000;
   var FILE_NAME = "Leave Planner";
   var STORE_KEY = "leavePlannerData";
   var FILE_ID_KEY = "leavePlannerFileId";
@@ -173,12 +175,48 @@ var LeaveStore = (function () {
    * until they select it once here.  That one-time step is the cost of not
    * requesting a restricted scope — it is not a bug to route around.
    */
-  function pickShared() {
+  /**
+   * api.js defines gapi, but the Picker is a *module* that only exists after
+   * gapi.load("picker") has run -- nothing did that, so google.picker was
+   * always undefined and "Pick a Sheet" could never open.  Both Google
+   * scripts are async/defer, so gapi itself may not be there yet when the
+   * button is clicked; wait for it rather than failing the first attempt.
+   */
+  function loadPicker() {
+    if (window.google && window.google.picker) return Promise.resolve();
     return new Promise(function (resolve, reject) {
-      if (!window.google || !google.picker) {
-        reject(new Error("Google Picker is not loaded."));
-        return;
-      }
+      var waited = 0;
+      (function wait() {
+        if (window.gapi && window.gapi.load) {
+          window.gapi.load("picker", {
+            callback: function () {
+              if (window.google && window.google.picker) resolve();
+              else reject(new Error("Google Picker failed to initialise."));
+            },
+            onerror: function () {
+              reject(new Error("Google Picker failed to load."));
+            },
+          });
+          return;
+        }
+        waited += PICKER_POLL_MS;
+        if (waited > PICKER_TIMEOUT_MS) {
+          reject(new Error(
+            "Google's picker script did not load \u2014 check your connection "
+            + "or any script blocker, then try again."));
+          return;
+        }
+        setTimeout(wait, PICKER_POLL_MS);
+      })();
+    });
+  }
+
+  function pickShared() {
+    return loadPicker().then(function () { return pickFrom(); });
+  }
+
+  function pickFrom() {
+    return new Promise(function (resolve, reject) {
       var view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS)
         .setIncludeFolders(false).setSelectFolderEnabled(false);
       new google.picker.PickerBuilder()
@@ -537,6 +575,7 @@ var LeaveStore = (function () {
                   readConfigInto: readConfigInto, readTypes: readTypes,
                   leaveRows: leaveRows, holidayRows: holidayRows,
                   emptyData: emptyData, isoOf: isoOf,
+                  loadPicker: loadPicker, pickShared: pickShared,
                   needsSeeding: needsSeeding },
   };
 })();
