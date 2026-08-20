@@ -26,6 +26,7 @@ var LeaveStore = (function () {
   var API_KEY = "";
   var SCOPE = "https://www.googleapis.com/auth/drive.file";
   var PICKER_POLL_MS = 100;      // gapi arrives async; poll for it
+  var SIGNIN_TIMEOUT_MS = 120000;  // backstop; error_callback is primary
   var PICKER_TIMEOUT_MS = 10000;
   var FILE_NAME = "Leave Planner";
   var STORE_KEY = "leavePlannerData";
@@ -91,15 +92,35 @@ var LeaveStore = (function () {
 
   function configured() { return !!(CLIENT_ID && API_KEY); }
 
+  /* GIS delivers success on `callback` but popup problems -- blocked, closed,
+     dismissed -- on `error_callback`.  Wiring only the former means a blocked
+     popup never settles the promise: the UI simply hangs with no error at
+     all.  Both are routed to whichever sign-in is currently waiting. */
+  var pendingAuth = null;
+
   function initAuth() {
     if (!configured()) return false;
     if (!window.google || !google.accounts || !google.accounts.oauth2) {
       return false;
     }
     tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID, scope: SCOPE, callback: function () {},
+      client_id: CLIENT_ID, scope: SCOPE,
+      callback: function (resp) { if (pendingAuth) pendingAuth.ok(resp); },
+      error_callback: function (err) { if (pendingAuth) pendingAuth.fail(err); },
     });
     return true;
+  }
+
+  function authErrorMessage(err) {
+    var type = err && err.type;
+    if (type === "popup_failed_to_open") {
+      return "Google's sign-in popup was blocked — allow popups for this "
+           + "site and try again.";
+    }
+    if (type === "popup_closed") {
+      return "Google sign-in was closed before it finished.";
+    }
+    return "Google sign-in failed" + (type ? " (" + type + ")." : ".");
   }
 
   function signIn(opts) {
@@ -112,10 +133,34 @@ var LeaveStore = (function () {
           : "Google sign-in is not configured."));
         return;
       }
-      tokenClient.callback = function (resp) {
-        if (resp.error) { reject(new Error(resp.error)); return; }
-        state.token = resp.access_token;
-        resolve(resp.access_token);
+      var done = false;
+      var timer = setTimeout(function () {
+        settle(function () {
+          reject(new Error(
+            "Google sign-in did not respond — check for a blocked popup, "
+            + "then try again."));
+        });
+      }, SIGNIN_TIMEOUT_MS);
+
+      function settle(fn) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        pendingAuth = null;
+        fn();
+      }
+
+      pendingAuth = {
+        ok: function (resp) {
+          settle(function () {
+            if (resp && resp.error) { reject(new Error(resp.error)); return; }
+            state.token = resp.access_token;
+            resolve(resp.access_token);
+          });
+        },
+        fail: function (err) {
+          settle(function () { reject(new Error(authErrorMessage(err))); });
+        },
       };
       tokenClient.requestAccessToken({ prompt: opts.silent ? "" : "consent" });
     });
@@ -155,7 +200,28 @@ var LeaveStore = (function () {
 
   // ------------------------------------------------------------- file open
 
+  function rememberedFile() {
+    try { return localStorage.getItem(FILE_ID_KEY); } catch (e) { return null; }
+  }
+
+  function forgetFile() {
+    try { localStorage.removeItem(FILE_ID_KEY); } catch (e) { /* ignore */ }
+  }
+
+  /* A file the picker granted once is reachable straight away.  If that
+     grant has since gone -- file deleted, un-shared, or a different Google
+     account signed in -- drop it and fall back to the name search rather
+     than failing the whole connect on a stale id. */
   function openOwn() {
+    var remembered = rememberedFile();
+    if (!remembered) return searchByName();
+    return useFile(remembered).catch(function () {
+      forgetFile();
+      return searchByName();
+    });
+  }
+
+  function searchByName() {
     var q = encodeURIComponent(
       "name='" + FILE_NAME + "' and mimeType=" +
       "'application/vnd.google-apps.spreadsheet' and trashed=false");
@@ -166,7 +232,18 @@ var LeaveStore = (function () {
           'No Sheet named "' + FILE_NAME + '" that this app can see. ' +
           "Create it, or use Pick a Sheet to select one shared with you.");
       })
-      .then(useFile);
+      .then(function (id) {
+        return useFile(id).catch(function (err) {
+          // drive.file lists a file the app may still not open: the classic
+          // hand-made Sheet that has never been through the picker.
+          if (/\b40[34]\b/.test(err.message)) {
+            throw new Error(
+              'Found "' + FILE_NAME + '" but this app cannot open it yet. '
+              + 'Click "Pick a Sheet" and select it once to grant access.');
+          }
+          throw err;
+        });
+      });
   }
 
   /**
@@ -233,12 +310,15 @@ var LeaveStore = (function () {
     });
   }
 
+  /* Verify first, then remember.  Storing the id up front left a bad one
+     behind whenever the open failed, so the next connect retried a file it
+     already knew it could not read. */
   function useFile(id) {
-    state.fileId = id;
-    try { localStorage.setItem(FILE_ID_KEY, id); } catch (e) { /* ignore */ }
     return api(DRIVE + "/files/" + id +
                "?fields=id,name,headRevisionId,capabilities(canEdit)")
       .then(function (meta) {
+        state.fileId = id;
+        try { localStorage.setItem(FILE_ID_KEY, id); } catch (e) { /* ignore */ }
         state.canEdit = !!(meta.capabilities && meta.capabilities.canEdit);
         state.revision = meta.headRevisionId || null;
         state.mode = "sheet";
@@ -576,6 +656,9 @@ var LeaveStore = (function () {
                   leaveRows: leaveRows, holidayRows: holidayRows,
                   emptyData: emptyData, isoOf: isoOf,
                   loadPicker: loadPicker, pickShared: pickShared,
+                  useFile: useFile, openOwn: openOwn,
+                  forgetFile: forgetFile, rememberedFile: rememberedFile,
+                  resetAuth: function () { tokenClient = null; pendingAuth = null; },
                   needsSeeding: needsSeeding },
   };
 })();

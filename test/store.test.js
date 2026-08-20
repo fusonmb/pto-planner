@@ -297,6 +297,92 @@ asyncCheck("pickShared loads the picker instead of giving up", async () => {
     throw new Error("pickShared still bails instead of loading the picker");
 });
 
+/* ---------------------------------------------- sign-in never hangs */
+/* GIS reports a blocked or closed popup on error_callback, not callback.
+   Only callback was wired, so a blocked popup left the promise forever
+   pending: the UI showed nothing at all and no error reached the banner. */
+
+function mockGis(behaviour) {
+  I.resetAuth();                       // tokenClient is module-level state
+  let cfg = null;
+  const g = {
+    accounts: { oauth2: {
+      initTokenClient: (c) => { cfg = c; return {
+        requestAccessToken: () => behaviour(cfg),
+      }; },
+      revoke: () => {},
+    } },
+  };
+  // the store reads both `window.google` and bare `google`; in a browser
+  // those are the same object, so the mock has to satisfy both
+  global.window.google = g;
+  global.google = g;
+}
+
+asyncCheck("a blocked popup rejects instead of hanging", async () => {
+  mockGis((cfg) => cfg.error_callback({ type: "popup_failed_to_open" }));
+  let msg = null;
+  await S.connect({}).then(() => {}, (e) => { msg = e.message; });
+  if (!msg) throw new Error("connect() never settled — the original hang");
+  if (!/blocked/i.test(msg) || !/allow popups/i.test(msg))
+    throw new Error(`unhelpful message: ${msg}`);
+});
+
+asyncCheck("a closed popup rejects with its own message", async () => {
+  mockGis((cfg) => cfg.error_callback({ type: "popup_closed" }));
+  let msg = null;
+  await S.connect({}).then(() => {}, (e) => { msg = e.message; });
+  if (!msg || !/closed before it finished/i.test(msg))
+    throw new Error(`unhelpful message: ${msg}`);
+});
+
+asyncCheck("an unknown auth error still names itself", async () => {
+  mockGis((cfg) => cfg.error_callback({ type: "something_new" }));
+  let msg = null;
+  await S.connect({}).then(() => {}, (e) => { msg = e.message; });
+  if (!msg || !/something_new/.test(msg))
+    throw new Error(`error type was swallowed: ${msg}`);
+});
+
+/* ------------------------------------------- remembered file id */
+
+asyncCheck("a failed open does not leave a file id behind", async () => {
+  global.localStorage.setItem("leavePlannerFileId", "");
+  global.localStorage.s["leavePlannerFileId"] = undefined;
+  delete global.localStorage.s["leavePlannerFileId"];
+  global.fetch = async () => ({
+    status: 404, ok: false, text: async () => '{"error":"File not found"}',
+  });
+  await I.useFile("bogus-id").then(() => {}, () => {});
+  const left = I.rememberedFile();
+  if (left) throw new Error(`stored a bad id anyway: ${left}`);
+});
+
+asyncCheck("a good open is remembered", async () => {
+  global.fetch = async () => ({
+    status: 200, ok: true,
+    json: async () => ({ id: "good-id", name: "Leave Planner",
+                         headRevisionId: "r1",
+                         capabilities: { canEdit: true } }),
+  });
+  await I.useFile("good-id");
+  if (I.rememberedFile() !== "good-id")
+    throw new Error(`did not remember: ${I.rememberedFile()}`);
+});
+
+asyncCheck("a listed-but-unopenable Sheet says to use Pick a Sheet", async () => {
+  I.forgetFile();
+  global.fetch = async (url) => (String(url).indexOf("/files?q=") >= 0
+    ? { status: 200, ok: true,
+        json: async () => ({ files: [{ id: "x1", name: "Leave Planner" }] }) }
+    : { status: 404, ok: false, text: async () => '{"error":"File not found"}' });
+  let msg = null;
+  await I.openOwn().then(() => {}, (e) => { msg = e.message; });
+  if (!msg) throw new Error("expected a failure");
+  if (!/Pick a Sheet/i.test(msg))
+    throw new Error(`raw API error reached the user: ${msg}`);
+});
+
 asyncCheck("loadPicker surfaces a gapi.load failure", async () => {
   delete global.window.google;
   global.window.gapi = { load: (n, cb) => cb.onerror() };
@@ -321,8 +407,8 @@ asyncCheck("loadPicker gives up if gapi never arrives", async () => {
 });
 
 runQueued().then((ran) => {
-if (ran !== 5) {
-  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 5`);
+if (ran !== 11) {
+  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 11`);
   process.exit(1);
 }
 console.log(`\n${pass} passed, ${failures.length} failed`);
