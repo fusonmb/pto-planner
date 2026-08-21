@@ -123,7 +123,14 @@ accrual rate and the cap ordering makes them go red.
 4. **Verify as a Viewer account** that every editing control is disabled.
    `readOnlyBlock()` gates all five mutating entry points, but this has not
    been exercised against a real Viewer session.
-5. **`manifest.json` + icons** so the page installs to the phone home screen.
+5. ~~**`manifest.json` + icons** so the page installs to the phone home
+   screen.~~ **Done.** `manifest.json` plus PNGs in `icons/`, and an
+   `apple-touch-icon` link because iOS ignores the manifest's icons. The
+   home-screen art is full-bleed square — the rounding is the OS's to
+   apply — while the tab favicon is a separate inline SVG carrying its own
+   rounded corners. No service worker: on a site deployed by pushing to
+   `main`, a caching worker can pin a stale build indefinitely, and offline
+   use was never a requirement.
 
 ## Concurrent edits
 

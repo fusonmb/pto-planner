@@ -7,6 +7,18 @@
 <!-- Tab icon, inline so there is no second request and no favicon.ico
      404 on every load.  Green card = PTOB, pink dot = parental. -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'> <rect width='64' height='64' rx='14' fill='%23008300'/> <rect x='10' y='14' width='44' height='42' rx='8' fill='%23ffffff'/> <rect x='18' y='4' width='7' height='14' rx='3.5' fill='%23ffffff'/> <rect x='39' y='4' width='7' height='14' rx='3.5' fill='%23ffffff'/> <rect x='17' y='25' width='30' height='7' rx='3.5' fill='%23008300'/> <circle cx='41' cy='45' r='9' fill='%23d55181'/> </svg>">
+<!-- Home-screen install.  iOS ignores the manifest's icons and uses
+     apple-touch-icon, which must be a real PNG; Android uses the manifest.
+     Both want a full-bleed square, so these are not the tab icon: the
+     rounding is the operating system's to apply, not ours. -->
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-title" content="Leave Planner">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
 <script>
   document.documentElement.dataset.theme =
       localStorage.getItem("ptoTheme") || "dark";
