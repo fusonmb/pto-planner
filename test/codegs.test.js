@@ -243,10 +243,10 @@ check("a populated Dashboard writes only rectangles", () => {
   const writes = mockSheets();
   const rows = gas.computeProjection_(
       { "2026-08-19": DAY(8, 0, "dentist") },
-      "2026-08-20", "2026-08-09", 142.69, "2018-11-13", "2026-08-14");
+      "2026-08-20", "2026-08-09", 200, "2019-04-01", "2026-09-01");
   if (!rows.length) throw new Error("fixture produced no rows");
   gas.writeDashboard_(rows, {
-    displayName: "Leave Planner", childBirthDate: "2026-08-14",
+    displayName: "Leave Planner", childBirthDate: "2026-09-01",
   }, "2026-08-20");
   if (!writes.length) throw new Error("nothing was written");
   assertRectangular(writes);
@@ -261,8 +261,8 @@ check("an empty Dashboard writes only rectangles", () => {
 
 check("the Dashboard reports the balance as of today, not the anchor", () => {
   const writes = mockSheets();
-  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
-                                      "2018-11-13", null);
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 200,
+                                      "2019-04-01", null);
   gas.writeDashboard_(rows, { displayName: "Leave Planner" }, "2026-08-20");
   const head = writes[0].data;
   const line = head.find(r => r[0] === "Current PTOB");
@@ -275,10 +275,10 @@ check("the Dashboard reports the balance as of today, not the anchor", () => {
 
 check("a populated Dashboard gets exactly one chart", () => {
   const writes = mockSheets();
-  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
-                                      "2018-11-13", "2026-08-14");
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 200,
+                                      "2019-04-01", "2026-09-01");
   gas.writeDashboard_(rows, { displayName: "Leave Planner",
-                              childBirthDate: "2026-08-14" }, "2026-08-20");
+                              childBirthDate: "2026-09-01" }, "2026-08-20");
   const c = writes.charts;
   if (c.inserted.length !== 1)
     throw new Error(`inserted ${c.inserted.length} charts, want 1`);
@@ -288,7 +288,7 @@ check("a populated Dashboard gets exactly one chart", () => {
 
 check("refreshing does not stack charts", () => {
   const writes = mockSheets();
-  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 200,
                                       null, null);
   const cfg = { displayName: "Leave Planner" };
   gas.writeDashboard_(rows, cfg, "2026-08-20");
@@ -303,10 +303,10 @@ check("refreshing does not stack charts", () => {
 
 check("the chart plots the balance, cap and parental columns", () => {
   const writes = mockSheets();
-  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
-                                      null, "2026-08-14");
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 200,
+                                      null, "2026-09-01");
   gas.writeDashboard_(rows, { displayName: "Leave Planner",
-                              childBirthDate: "2026-08-14" }, "2026-08-20");
+                              childBirthDate: "2026-09-01" }, "2026-08-20");
   const g = writes.charts.calls.ranges.map(r => r.__geom);
   if (g.length !== 3)
     throw new Error(`${g.length} ranges, expected date + balance/cap + parental`);
@@ -325,7 +325,7 @@ check("the chart plots the balance, cap and parental columns", () => {
 
 check("no birth date means no parental series", () => {
   const writes = mockSheets();
-  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 200,
                                       null, null);
   gas.writeDashboard_(rows, { displayName: "Leave Planner" }, "2026-08-20");
   const c = writes.charts.calls;
@@ -337,7 +337,7 @@ check("no birth date means no parental series", () => {
 
 check("the chart is anchored clear of the table", () => {
   const writes = mockSheets();
-  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 142.69,
+  const rows = gas.computeProjection_({}, "2026-08-20", "2026-08-09", 200,
                                       null, null);
   gas.writeDashboard_(rows, { displayName: "Leave Planner" }, "2026-08-20");
   const pos = writes.charts.calls.position;
