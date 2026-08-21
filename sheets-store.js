@@ -31,6 +31,8 @@ var LeaveStore = (function () {
   var FILE_NAME = "Leave Planner";
   var STORE_KEY = "leavePlannerData";
   var FILE_ID_KEY = "leavePlannerFileId";
+  var TOKEN_KEY = "leavePlannerToken";
+  var TOKEN_MARGIN_MS = 60000;   // treat as expired a minute early
   var APP_ID = null;             // defaults to the client id prefix
 
   var SHEETS = "https://sheets.googleapis.com/v4/spreadsheets";
@@ -99,6 +101,43 @@ var LeaveStore = (function () {
      all.  Both are routed to whichever sign-in is currently waiting. */
   var pendingAuth = null;
 
+  /**
+   * Google issues an access token good for about an hour but no refresh
+   * token, and the token was previously kept in memory only -- so every page
+   * load started with nothing and had to ask again.  On a desktop that ask
+   * is invisible, because a live Google session answers it silently.  A
+   * phone often cannot: browser privacy rules block the quiet path, and the
+   * user gets a popup every single time.
+   *
+   * Keeping the token until it actually expires removes that ask on both.
+   * It does sit in localStorage, which is a real trade -- but the plan data
+   * is already there, and the token reaches nothing beyond the one Sheet
+   * this app was granted, so it exposes no more than is already present.
+   */
+  function saveToken(token, expiresInSec) {
+    var ttl = (Number(expiresInSec) || 3600) * 1000;
+    try {
+      localStorage.setItem(TOKEN_KEY, JSON.stringify({
+        token: token, expiresAt: Date.now() + ttl,
+      }));
+    } catch (e) { /* private mode: fall back to memory only */ }
+  }
+
+  function savedToken() {
+    try {
+      var raw = localStorage.getItem(TOKEN_KEY);
+      if (!raw) return null;
+      var o = JSON.parse(raw);
+      if (!o || !o.token) return null;
+      if (Date.now() + TOKEN_MARGIN_MS >= o.expiresAt) return null;
+      return o.token;
+    } catch (e) { return null; }
+  }
+
+  function dropToken() {
+    try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignore */ }
+  }
+
   function initAuth() {
     if (!configured()) return false;
     if (!window.google || !google.accounts || !google.accounts.oauth2) {
@@ -126,6 +165,11 @@ var LeaveStore = (function () {
 
   function signIn(opts) {
     opts = opts || {};
+    if (!state.token) {
+      var saved = savedToken();
+      if (saved) state.token = saved;
+    }
+    if (state.token) return Promise.resolve(state.token);
     return new Promise(function (resolve, reject) {
       if (!tokenClient && !initAuth()) {
         // distinguish "no credentials" from "the Google library never loaded"
@@ -156,6 +200,7 @@ var LeaveStore = (function () {
           settle(function () {
             if (resp && resp.error) { reject(new Error(resp.error)); return; }
             state.token = resp.access_token;
+            saveToken(resp.access_token, resp.expires_in);
             resolve(resp.access_token);
           });
         },
@@ -189,6 +234,7 @@ var LeaveStore = (function () {
       google.accounts.oauth2.revoke(state.token, function () {});
     }
     state.token = null;
+    dropToken();
     state.mode = "local";
     state.fileId = null;
     log("info", "Signed out — using this browser's local copy.");
@@ -205,6 +251,7 @@ var LeaveStore = (function () {
     }).then(function (res) {
       if (res.status === 401) {
         state.token = null;
+        dropToken();
         throw new Error("Google sign-in expired — sign in again.");
       }
       if (!res.ok) {
@@ -750,9 +797,14 @@ var LeaveStore = (function () {
                   loadPicker: loadPicker, pickShared: pickShared,
                   useFile: useFile, openOwn: openOwn,
                   forgetFile: forgetFile, rememberedFile: rememberedFile,
-                  resetAuth: function () { tokenClient = null; pendingAuth = null; },
+                  resetAuth: function () {
+                    tokenClient = null; pendingAuth = null;
+                    state.token = null; dropToken();
+                  },
                   appId: appId, pickFrom: pickFrom,
                   authenticate: authenticate,
+                  savedToken: savedToken, saveToken: saveToken,
+                  dropToken: dropToken,
                   needsSeeding: needsSeeding },
   };
 })();

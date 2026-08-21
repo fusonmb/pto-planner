@@ -237,8 +237,8 @@
     <button id="backupBtn" title="Download your data as a JSON file">Backup data</button>
     <button id="restoreBtn" title="Load data from a backup JSON file">Restore</button>
     <input type="file" id="restoreFile" accept=".json,application/json" hidden>
-    <button id="syncBtn" title="Connect this planner to your Google Sheet"
-            hidden>Google Sheets</button>
+    <button id="syncBtn" title="Sync this planner with your Google Sheet"
+            hidden>Google Sync</button>
   </div>
   <div id="syncBar" class="syncbar" hidden><span id="syncMsg"></span>
     <button id="syncPick" title="Select a Sheet shared with you">Pick a Sheet</button>
@@ -1420,6 +1420,13 @@ function applyReadOnly() {
   syncBar("readonly", "Read-only — this Sheet is shared with you as a Viewer.");
 }
 
+/* The two ways the store says "no Sheet I can open": none found under this
+   account, and one found that the app has never been granted. */
+function needsAPick(err) {
+  const m = String(err && err.message || "");
+  return /No Sheet named/i.test(m) || /cannot open it yet/i.test(m);
+}
+
 async function syncConnect(opts) {
   opts = opts || {};
   try {
@@ -1428,6 +1435,13 @@ async function syncConnect(opts) {
     await refresh();
     applyReadOnly();
   } catch (err) {
+    // Nothing usable to open yet.  Making the user find a second button to
+    // finish what they just asked for is a puzzle, not a choice, so go
+    // straight to the picker -- once, so a refusal cannot loop.
+    if (!opts.silent && !opts.pick && needsAPick(err)) {
+      syncBar("info", "Choose your Leave Planner Sheet…");
+      return syncConnect({pick: true});
+    }
     if (opts.silent) {
       // A silent reconnect fails routinely -- no Google session in this
       // browser yet, or a phone that has cleared it.  Staying quiet was

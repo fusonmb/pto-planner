@@ -7,6 +7,10 @@
 global.localStorage = {
   s: {}, getItem(k) { return k in this.s ? this.s[k] : null; },
   setItem(k, v) { this.s[k] = String(v); },
+  // Without removeItem the store's clean-up paths threw silently and every
+  // "forget this" call was a no-op, so tests passed for the wrong reason.
+  removeItem(k) { delete this.s[k]; },
+  clear() { this.s = {}; },
 };
 global.window = {};
 const S = require("../sheets-store.js");
@@ -295,6 +299,92 @@ asyncCheck("pickShared loads the picker instead of giving up", async () => {
   // it must not be "Google Picker is not loaded."
   if (msg && /picker is not loaded/i.test(msg))
     throw new Error("pickShared still bails instead of loading the picker");
+});
+
+/* ------------------------------- the UI's auto-pick trigger matches */
+/* The Google Sync button falls through to the picker by matching the store's
+   error text.  That coupling is invisible from either file, so if someone
+   rewords a message the button quietly stops being able to recover. */
+
+check("needsAPick matches the messages the store actually produces", () => {
+  const fs = require("fs"), path = require("path");
+  const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+  const src = /function needsAPick\(err\) \{[\s\S]*?\n\}/.exec(html);
+  ok(src, "needsAPick not found in index.html");
+  // eslint-disable-next-line no-eval
+  const needsAPick = eval("(" + src[0].replace("function needsAPick", "function") + ")");
+
+  const store = fs.readFileSync(path.join(__dirname, "..", "sheets-store.js"), "utf8");
+  const noSheet = /'No Sheet named "' \+ FILE_NAME \+ '([^']*)'/.exec(store);
+  ok(noSheet, "the 'No Sheet named' message has moved or been reworded");
+  ok(needsAPick(new Error('No Sheet named "Leave Planner"' + noSheet[1])),
+     "needsAPick no longer matches the not-found message");
+
+  ok(/cannot open it yet/.test(store),
+     "the 'cannot open it yet' message has moved or been reworded");
+  ok(needsAPick(new Error('Found "Leave Planner" but this app cannot open '
+                          + 'it yet. Click "Pick a Sheet" and select it once '
+                          + 'to grant access.')),
+     "needsAPick no longer matches the not-granted message");
+
+  // and it must NOT fire on unrelated failures, or a popup problem would
+  // silently turn into a picker
+  ok(!needsAPick(new Error("Google's sign-in popup was blocked — allow "
+                           + "popups for this site and try again.")),
+     "needsAPick fires on an auth error");
+  ok(!needsAPick(new Error("Google sign-in expired — sign in again.")),
+     "needsAPick fires on an expired session");
+});
+
+/* ------------------------------------------------- token reuse */
+/* Google gives an access token good for ~an hour and no refresh token. It
+   used to live in memory only, so every page load had to ask again -- silent
+   on a desktop with a live Google session, a popup every time on a phone. */
+
+asyncCheck("a live token is reused without asking Google", async () => {
+  I.resetAuth();
+  I.saveToken("cached-tok", 3600);
+  let asked = false;
+  const g = { accounts: { oauth2: {
+    initTokenClient: () => ({ requestAccessToken: () => { asked = true; } }),
+    revoke: () => {},
+  } } };
+  global.window.google = g; global.google = g;
+  const tok = await I.authenticate({});
+  if (asked) throw new Error("asked Google despite holding a live token");
+  eq(tok, "cached-tok", "token");
+});
+
+asyncCheck("an expired token is not reused", async () => {
+  I.resetAuth();
+  I.saveToken("stale-tok", -10);            // already past its expiry
+  if (I.savedToken()) throw new Error("offered an expired token");
+  const prompts = mockGisSeq([grant]);
+  await I.authenticate({});
+  eq(prompts, [""], "had to ask again, quietly");
+});
+
+asyncCheck("a token about to expire is not reused", async () => {
+  I.resetAuth();
+  I.saveToken("nearly-tok", 30);            // inside the safety margin
+  if (I.savedToken())
+    throw new Error("offered a token expiring inside the margin");
+});
+
+asyncCheck("a rejected token is discarded, not retried", async () => {
+  I.resetAuth();
+  I.saveToken("revoked-tok", 3600);
+  global.fetch = async () => ({ status: 401, ok: false, text: async () => "" });
+  await I.useFile("f1").then(() => {}, () => {});
+  if (I.savedToken())
+    throw new Error("kept a token Google had already rejected");
+});
+
+asyncCheck("signing out forgets the token", async () => {
+  I.resetAuth();
+  I.saveToken("tok", 3600);
+  S.signOut();
+  if (I.savedToken()) throw new Error("token survived sign-out");
 });
 
 /* --------------------------------------- knowing whether to expect a Sheet */
@@ -589,8 +679,8 @@ asyncCheck("loadPicker gives up if gapi never arrives", async () => {
 });
 
 runQueued().then((ran) => {
-if (ran !== 23) {
-  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 23`);
+if (ran !== 28) {
+  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 28`);
   process.exit(1);
 }
 console.log(`\n${pass} passed, ${failures.length} failed`);
