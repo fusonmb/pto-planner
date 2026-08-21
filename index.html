@@ -54,7 +54,13 @@
   h1 { font-size: 20px; margin: 0; }
   .titlebar { display: flex; align-items: center; gap: 10px; margin-bottom: 2px; }
   .titlebar .spacer { flex: 1; }
-  .sub { color: var(--ink-2); margin: 0 0 16px; font-size: 13px; }
+  .sub { color: var(--ink-2); margin: 8px 0 0; font-size: 13px; }
+  .subwrap { margin: 0 0 16px; }
+  .subwrap > summary {
+    cursor: pointer; color: var(--ink-2); font-size: 13px;
+    width: fit-content; padding: 2px 0; list-style-position: inside;
+  }
+  .subwrap > summary:hover { color: var(--ink); }
   .wrap { max-width: 1180px; margin: 0 auto; }
 
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -198,7 +204,16 @@
   @media (max-width: 700px) {
     body { padding: 12px; }
     h1 { font-size: 18px; }
-    .titlebar { flex-wrap: wrap; }
+    /* Keep the title and its buttons on one line: drop the spacer so the
+       buttons sit beside the title rather than being pushed to the right
+       edge, and let the heading -- not the buttons -- give up the room. */
+    .titlebar { flex-wrap: nowrap; gap: 6px; }
+    .titlebar .spacer { display: none; }
+    .titlebar h1 { flex: 0 1 auto; min-width: 0; white-space: nowrap;
+                   overflow: hidden; text-overflow: ellipsis; }
+    .titlebar button { flex: 0 0 auto; padding: 5px 8px; font-size: 12px; }
+    /* the roll-down is desktop-only; the mobile tip covers the gestures */
+    .subwrap { display: none; }
     /* declutter: hide explanatory text; the mobile tip covers the gestures */
     .sub, .legend-note, .editor .hint { display: none; }
     /* metrics are secondary on a phone: move them below calendar + chart */
@@ -234,15 +249,17 @@
   <div class="titlebar">
     <h1>Leave Planner</h1>
     <div class="spacer"></div>
-    <button id="themeBtn" title="Toggle light/dark">Theme</button>
-    <button id="unitsBtn" title="Display in hours or days (8 h = 1 d)"></button>
     <button id="syncBtn" title="Sync this planner with your Google Sheet"
             hidden>Google Sync</button>
+    <button id="unitsBtn" title="Display in hours or days (8 h = 1 d)"></button>
+    <button id="themeBtn" title="Toggle light/dark">Theme</button>
   </div>
   <div id="syncBar" class="syncbar" hidden><span id="syncMsg"></span>
     <button id="syncOff" title="Work from this browser only">Disconnect</button>
   </div>
-  <p class="sub"><b style="color:var(--leave-b)">PTOB (B), green</b>:
+  <details class="subwrap">
+    <summary>How this works</summary>
+    <p class="sub"><b style="color:var(--leave-b)">PTOB (B), green</b>:
      6.7692 h accrue every two weeks, 8.000 h after nine years
      (balance posts every other Sunday); cap 240 h, 320 h after nine years;
      <span id="subAnchor"></span> &middot;
@@ -254,7 +271,8 @@
      Click a day &mdash; or click and drag &mdash; then Save.
      <span class="touch-hint">On touch: long-press a day to start a range,
      then tap the last day.</span>
-     Data is saved in this browser; use Backup for a portable copy.</p>
+     Data is saved in this browser; use Local Backup for a portable copy.</p>
+  </details>
 
   <div class="tiles" id="tiles"></div>
 
