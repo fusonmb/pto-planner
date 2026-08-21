@@ -336,6 +336,39 @@ check("needsAPick matches the messages the store actually produces", () => {
      "needsAPick fires on an expired session");
 });
 
+/* ------------------------------------------- the connected message */
+
+asyncCheck("connecting names the sheet it connected to", async () => {
+  I.resetAuth(); I.forgetFile();
+  const said = [];
+  S.onStatus((m) => said.push(m.message));
+  global.fetch = async () => ({
+    status: 200, ok: true,
+    json: async () => ({ id: "f1", name: "Leave Planner", headRevisionId: "r1",
+                         capabilities: { canEdit: true } }),
+  });
+  await I.useFile("f1");
+  const msg = said.find((m) => /Connected to/.test(m));
+  ok(msg, "nothing said on connect");
+  eq(msg, 'Connected to "Leave Planner" sheet.', "connected message");
+});
+
+asyncCheck("a Viewer is told the sheet name and that it is read-only", async () => {
+  I.resetAuth(); I.forgetFile();
+  const said = [];
+  S.onStatus((m) => said.push(m.message));
+  global.fetch = async () => ({
+    status: 200, ok: true,
+    json: async () => ({ id: "f2", name: "Our Leave", headRevisionId: "r1",
+                         capabilities: { canEdit: false } }),
+  });
+  await I.useFile("f2");
+  const msg = said.find((m) => /Connected to/.test(m));
+  ok(msg, "nothing said on connect");
+  ok(/"Our Leave" sheet/.test(msg), `sheet not named: ${msg}`);
+  ok(/read-only/.test(msg), `Viewer not warned: ${msg}`);
+});
+
 /* ------------------------------------------------- token reuse */
 /* Google gives an access token good for ~an hour and no refresh token. It
    used to live in memory only, so every page load had to ask again -- silent
@@ -679,8 +712,8 @@ asyncCheck("loadPicker gives up if gapi never arrives", async () => {
 });
 
 runQueued().then((ran) => {
-if (ran !== 28) {
-  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 28`);
+if (ran !== 30) {
+  console.log(`\nHARNESS ERROR: ${ran} async checks ran, expected 30`);
   process.exit(1);
 }
 console.log(`\n${pass} passed, ${failures.length} failed`);

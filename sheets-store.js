@@ -405,8 +405,9 @@ var LeaveStore = (function () {
         state.revision = meta.headRevisionId || null;
         state.mode = "sheet";
         log("info", state.canEdit
-          ? 'Connected to "' + meta.name + '".'
-          : 'Connected to "' + meta.name + '" — read-only (you are a Viewer).');
+          ? 'Connected to "' + meta.name + '" sheet.'
+          : 'Connected to "' + meta.name + '" sheet — read-only '
+            + '(you are a Viewer).');
         return id;
       });
   }
