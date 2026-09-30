@@ -353,6 +353,44 @@ check("an unconfigured Dashboard carries no chart", () => {
     throw new Error("charted an empty projection");
 });
 
+/* --------------------------------------------- the accrual rate */
+/* MITRE's own screens show 6.77, which is 176 h/yr / 26 periods rounded to
+   two places. Entering that rounded figure as the rate over-accrues by
+   0.02 h a year and drifts the planner away from the timecard, so the
+   unrounded value is deliberate -- pin it in both engines. */
+
+check("both engines accrue at the unrounded rate", () => {
+  const fs = require("fs"), path = require("path");
+  const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+  const m = /const ACCRUAL_BASE = ([\d.]+);/.exec(html);
+  if (!m) throw new Error("ACCRUAL_BASE not found in index.html");
+  const appRate = Number(m[1]);
+  const gasRate = gas.defaultRules_().rateBase;
+
+  if (appRate !== gasRate)
+    throw new Error(`app ${appRate} != Code.gs ${gasRate}`);
+  if (appRate === 6.77)
+    throw new Error("the rate was rounded to 6.77; use the unrounded 6.7692");
+  // within a ten-thousandth of 176/26, and never above it
+  const exact = 176 / 26;
+  if (Math.abs(appRate - exact) > 1e-4)
+    throw new Error(`rate ${appRate} is not 176/26 (${exact.toFixed(6)})`);
+  if (appRate > exact)
+    throw new Error(`rate ${appRate} over-accrues against 176/26`);
+});
+
+check("the shipped LeaveTypes registry carries the same rate", () => {
+  // Code.gs takes its rate from the Sheet's LeaveTypes tab, so a hand-typed
+  // 6.77 there would drift the Dashboard away from the app on its own.
+  const fs = require("fs"), path = require("path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "apps-script", "Code.gs"), "utf8");
+  const row = /\['PTOB', 'PTOB', THEME\.ptob, 'biweekly', ([\d.]+),/.exec(src);
+  if (!row) throw new Error("the PTOB row in TYPE_DEFAULTS has moved");
+  const registryRate = Number(row[1]);
+  if (registryRate !== gas.defaultRules_().rateBase)
+    throw new Error(`registry ${registryRate} != default ${gas.defaultRules_().rateBase}`);
+});
+
 console.log(`\n${pass} passed, ${failures.length} failed`);
 if (failures.length) {
   console.log("\nFAILURES:");
