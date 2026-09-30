@@ -47,6 +47,7 @@ var LeaveStore = (function () {
     fileId: null,
     canEdit: true,
     revision: null,       // Drive headRevisionId seen at last read
+    configGrid: null,     // Config tab as last read, for merging
     cache: null,
     types: [],
     pending: null,        // in-flight flush, so saves serialize
@@ -449,6 +450,7 @@ var LeaveStore = (function () {
     return batchGet([TAB.config, TAB.types, TAB.leave, TAB.holidays])
       .then(function (res) {
         var data = emptyData();
+        state.configGrid = grid(res, 0);   // kept so writes can merge
         readConfigInto(grid(res, 0), data);
         state.types = readTypes(grid(res, 1));
         readLeaveInto(grid(res, 2), state.types, data);
@@ -668,14 +670,47 @@ var LeaveStore = (function () {
     return [head].concat(body);
   }
 
+  /**
+   * The Config tab holds more than this app manages -- displayName,
+   * hoursPerDay, maxDayHours, timezone, the Notes column, and anything the
+   * user adds by hand.  This used to emit only the four managed keys and
+   * write them over the top of the tab, which left every later row in
+   * place: the reader takes the LAST row for a key, so a stale
+   * anchorBalance sitting below the fresh one silently won and the anchor
+   * appeared to revert on its own.  Merge onto what is actually there, and
+   * drop duplicate rows for a managed key so an already-corrupted tab is
+   * repaired on the next save.
+   */
   function configRows(data) {
-    var out = [["Key", "Value", "Notes"]];
-    if (data.hireDate) out.push(["hireDate", data.hireDate, ""]);
-    if (data.birthDate) out.push(["childBirthDate", data.birthDate, ""]);
-    if (data.anchor) {
-      out.push(["anchorSunday", data.anchor.date, ""]);
-      out.push(["anchorBalance", data.anchor.balance, ""]);
+    var managed = {
+      hireDate: data.hireDate || "",
+      childBirthDate: data.birthDate || "",
+      anchorSunday: data.anchor ? data.anchor.date : "",
+      anchorBalance: data.anchor ? data.anchor.balance : "",
+    };
+    var grid = state.configGrid;
+    var head = (grid && grid.length && grid[0] && grid[0].length)
+      ? grid[0].slice() : ["Key", "Value", "Notes"];
+    var out = [head];
+    var written = {};
+
+    for (var i = 1; grid && i < grid.length; i++) {
+      var row = (grid[i] || []).slice();
+      var key = String(row[0] || "").trim();
+      if (!key) continue;
+      if (Object.prototype.hasOwnProperty.call(managed, key)) {
+        if (written[key]) continue;        // a duplicate: drop it
+        written[key] = true;
+        row[1] = managed[key];             // blank clears, it does not delete
+      }
+      out.push(row);
     }
+
+    // anything managed that the tab does not carry yet
+    ["hireDate", "anchorSunday", "anchorBalance", "childBirthDate"]
+      .forEach(function (k) {
+        if (!written[k] && managed[k] !== "") out.push([k, managed[k], ""]);
+      });
     return out;
   }
 
@@ -702,7 +737,8 @@ var LeaveStore = (function () {
         // clear the ranges first so deleted rows actually disappear
         return api(SHEETS + "/" + state.fileId + "/values:batchClear", {
           method: "POST",
-          body: { ranges: [TAB.leave + "!A2:Z", TAB.holidays + "!A2:Z"] },
+          body: { ranges: [TAB.leave + "!A2:Z", TAB.holidays + "!A2:Z",
+                           TAB.config + "!A2:Z"] },
         });
       })
       .then(function () {
@@ -803,6 +839,8 @@ var LeaveStore = (function () {
                     state.token = null; dropToken();
                   },
                   appId: appId, pickFrom: pickFrom,
+                  configRows: configRows,
+                  setConfigGrid: function (g) { state.configGrid = g; },
                   authenticate: authenticate,
                   savedToken: savedToken, saveToken: saveToken,
                   dropToken: dropToken,

@@ -336,6 +336,147 @@ check("needsAPick matches the messages the store actually produces", () => {
      "needsAPick fires on an expired session");
 });
 
+/* ----------------------------------------------- Config round-trip */
+/* The Config tab holds eight keys; the app manages four. It used to write
+   only its four over the top of the tab without clearing, so every later
+   row survived -- and since the reader takes the LAST row for a key, a
+   stale anchorBalance below the fresh one won. The anchor reverted on its
+   own, or worse, kept a new date against an old balance. */
+
+const CONFIG_AS_SETUP_LEAVES_IT = () => ([
+  ["Key", "Value", "Notes"],
+  ["displayName", "Leave Planner", "Shown on the Dashboard"],
+  ["hireDate", "2019-04-01", "drives the nine-year step-up"],
+  ["anchorSunday", "2026-08-09", "a pay-period posting Sunday"],
+  ["anchorBalance", 142.69, "known balance ON anchorSunday"],
+  ["childBirthDate", "", "blank disables parental leave"],
+  ["hoursPerDay", 8, "display only"],
+  ["maxDayHours", 8, "max combined hours"],
+  ["timezone", "America/New_York", "date display only"],
+]);
+
+const keyed = (rows) => {
+  const o = {};
+  for (let i = 1; i < rows.length; i++) {
+    const k = String(rows[i][0] || "").trim();
+    if (k) o[k] = rows[i][1];          // later rows win, as the readers do
+  }
+  return o;
+};
+
+check("a re-anchor survives the round trip", () => {
+  I.setConfigGrid(CONFIG_AS_SETUP_LEAVES_IT());
+  const rows = I.configRows({
+    hireDate: "2019-04-01", birthDate: null,
+    anchor: { date: "2026-09-20", balance: 150 },
+  });
+  const got = keyed(rows);
+  eq(got.anchorSunday, "2026-09-20", "anchor date");
+  eq(got.anchorBalance, 150, "anchor balance");
+});
+
+check("no duplicate row can outvote the fresh anchor", () => {
+  I.setConfigGrid(CONFIG_AS_SETUP_LEAVES_IT());
+  const rows = I.configRows({
+    hireDate: "2019-04-01", birthDate: null,
+    anchor: { date: "2026-09-20", balance: 150 },
+  });
+  for (const k of ["anchorSunday", "anchorBalance", "hireDate", "childBirthDate"]) {
+    const n = rows.filter(r => String(r[0]).trim() === k).length;
+    if (n > 1) throw new Error(`${k} written ${n} times`);
+  }
+});
+
+check("an already-corrupted tab is repaired on save", () => {
+  const corrupt = CONFIG_AS_SETUP_LEAVES_IT();
+  corrupt.splice(5, 0, ["anchorBalance", 999, "stale duplicate"]);
+  I.setConfigGrid(corrupt);
+  const rows = I.configRows({
+    hireDate: "2019-04-01", birthDate: null,
+    anchor: { date: "2026-09-20", balance: 150 },
+  });
+  eq(rows.filter(r => String(r[0]).trim() === "anchorBalance").length, 1,
+     "anchorBalance rows after repair");
+  eq(keyed(rows).anchorBalance, 150, "anchor balance");
+});
+
+check("keys the app does not manage are preserved, notes and all", () => {
+  I.setConfigGrid(CONFIG_AS_SETUP_LEAVES_IT());
+  const rows = I.configRows({
+    hireDate: "2019-04-01", birthDate: null,
+    anchor: { date: "2026-09-20", balance: 150 },
+  });
+  const got = keyed(rows);
+  eq(got.displayName, "Leave Planner", "displayName");
+  eq(got.hoursPerDay, 8, "hoursPerDay");
+  eq(got.maxDayHours, 8, "maxDayHours");
+  eq(got.timezone, "America/New_York", "timezone");
+  const tz = rows.find(r => String(r[0]).trim() === "timezone");
+  eq(tz[2], "date display only", "Notes column kept");
+});
+
+check("clearing the birth date blanks the cell, it does not drop the row", () => {
+  const g = CONFIG_AS_SETUP_LEAVES_IT();
+  g[5][1] = "2026-09-01";
+  I.setConfigGrid(g);
+  const rows = I.configRows({
+    hireDate: "2019-04-01", birthDate: null,
+    anchor: { date: "2026-09-20", balance: 150 },
+  });
+  const row = rows.find(r => String(r[0]).trim() === "childBirthDate");
+  ok(row, "childBirthDate row was dropped instead of blanked");
+  eq(row[1], "", "childBirthDate value");
+});
+
+check("a managed key missing from the tab is appended", () => {
+  I.setConfigGrid([["Key", "Value", "Notes"], ["timezone", "UTC", ""]]);
+  const rows = I.configRows({
+    hireDate: null, birthDate: null,
+    anchor: { date: "2026-09-20", balance: 150 },
+  });
+  const got = keyed(rows);
+  eq(got.anchorSunday, "2026-09-20", "anchor date appended");
+  eq(got.anchorBalance, 150, "anchor balance appended");
+  eq(got.timezone, "UTC", "existing key kept");
+});
+
+check("end to end: the Sheet reads back the anchor that was saved", () => {
+  // Model the real API. values.batchUpdate with an unbounded range overlays
+  // rows 1..N and leaves everything below; batchClear on A2:Z first is what
+  // makes the write authoritative. Which ranges get cleared is read out of
+  // the source, so this test follows the code rather than restating it.
+  const fs = require("fs"), path = require("path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "sheets-store.js"), "utf8");
+  const clears = /ranges: \[([^\]]*)\]/.exec(src)[1];
+  const configCleared = /TAB\.config/.test(clears);
+
+  I.setConfigGrid(CONFIG_AS_SETUP_LEAVES_IT());
+  const written = I.configRows({
+    hireDate: "2019-04-01", birthDate: null,
+    anchor: { date: "2026-09-20", balance: 150 },
+  });
+
+  let sheet = CONFIG_AS_SETUP_LEAVES_IT();
+  if (configCleared) sheet = [sheet[0]];          // A2:Z wiped
+  const merged = sheet.slice();
+  for (let i = 0; i < written.length; i++) merged[i] = written[i];
+
+  const got = keyed(merged);
+  eq(got.anchorSunday, "2026-09-20", "anchor date read back from the Sheet");
+  eq(got.anchorBalance, 150, "anchor balance read back from the Sheet");
+  // the pairing is what actually corrupted: a new date against an old balance
+  if (got.anchorSunday === "2026-09-20" && got.anchorBalance === 142.69)
+    throw new Error("new anchor date kept against the old balance");
+});
+
+check("Config is cleared before writing, or dropped rows would linger", () => {
+  const fs = require("fs"), path = require("path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "sheets-store.js"), "utf8");
+  const m = /ranges: \[([^\]]*)\]/.exec(src);
+  ok(m, "batchClear ranges not found");
+  ok(/TAB\.config/.test(m[1]), "Config is not in the batchClear ranges");
+});
+
 /* ------------------------------------------- the connected message */
 
 asyncCheck("connecting names the sheet it connected to", async () => {
