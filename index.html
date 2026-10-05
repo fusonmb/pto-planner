@@ -162,6 +162,27 @@
   .editor .err { color: var(--critical); font-size: 12px; }
   .editor .holinfo { color: var(--hol-ink); font-size: 12px; }
 
+  .anchoredit { margin-bottom: 16px; }
+  .anchoredit .row { display: flex; gap: 8px; align-items: center;
+                     flex-wrap: wrap; margin-bottom: 8px; }
+  .anchoredit .row:last-child { margin-bottom: 0; }
+  .anchoredit label { color: var(--muted); font-size: 13px; }
+  .anchoredit .field { display: flex; align-items: center; gap: 8px; }
+  .anchoredit input[type=number] {
+    width: 110px; font: inherit; font-size: 16px; padding: 6px 8px;
+    background: var(--page); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 7px;
+  }
+  .anchoredit select {
+    font: inherit; font-size: 16px; padding: 6px 8px;
+    background: var(--page); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 7px;
+  }
+  .anchoredit .hint { color: var(--muted); font-size: 12px; }
+  .anchoredit .preview { color: var(--muted); font-size: 13px; min-height: 18px; }
+  .anchoredit .preview b { color: var(--ink); font-weight: 600; }
+  .anchoredit .err { color: var(--critical); font-size: 13px; min-height: 0; }
+
   /* ---- chart ---- */
   .chart-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
   .chart-head h2 { flex: 1; margin: 0; }
@@ -237,6 +258,17 @@
              grid-template-columns: repeat(2, 1fr); gap: 8px; }
     .foot { order: 4; }
     .foot.tools { order: 5; }
+    /* the balance editor is a form, not a tile: give it room on a phone */
+    .anchoredit { order: 1; }
+    .anchoredit .row { gap: 6px; }
+    .anchoredit .row { flex-direction: column; align-items: stretch; }
+    .anchoredit .field { flex-direction: column; align-items: stretch;
+                         gap: 4px; width: 100%; }
+    .anchoredit input[type=number] { width: 100%; }
+    .anchoredit select { width: 100%; }
+    .anchoredit .row:has(> button) { flex-direction: row; }
+    .anchoredit .row > button { flex: 1 1 auto; padding: 10px 12px; }
+    .anchoredit .hint { display: none; }
     .tile { padding: 9px 10px; }
     .tile .value { font-size: 19px; }
     .cols { gap: 12px; }
@@ -290,6 +322,35 @@
   </details>
 
   <div class="tiles" id="tiles"></div>
+
+  <!-- Setting the anchor used to happen inside the tile itself: the number
+       prefilled from the PROJECTED balance, so changing only the date
+       re-anchored a derived figure onto an older Sunday and moved the whole
+       plan.  It also saved on blur, which on a phone fires when the date
+       picker opens.  Both fields live here now, with an explicit Save and a
+       preview of what the change actually does. -->
+  <div class="card anchoredit" id="anchorEditor" style="display:none">
+    <div class="row"><strong>Set your PTOB balance</strong>
+      <span class="hint">type the balance your timecard shows, and the
+        Sunday it was showing it</span></div>
+    <div class="row">
+      <span class="field">
+        <label for="anHours">Balance (hours)</label>
+        <input type="number" id="anHours" step="0.01" min="-320" max="320"
+               inputmode="decimal">
+      </span>
+      <span class="field">
+        <label for="anDate">as of</label>
+        <select id="anDate"></select>
+      </span>
+    </div>
+    <div class="row preview" id="anPreview"></div>
+    <div class="row">
+      <button class="saveb" id="anSave">Save balance</button>
+      <button id="anCancel">Cancel</button>
+    </div>
+    <div class="row err" id="anErr"></div>
+  </div>
 
   <div class="cols">
     <div class="card">
@@ -838,7 +899,7 @@ function renderSetupTiles() {
     `<div class="note">enter your current PTOB balance to begin; add a hire ` +
     `date below for the nine-year step-up</div></div>`;
   const balVal = $("tiles").children[0].querySelector(".value");
-  balVal.addEventListener("click", () => editBalance(balVal, 0));
+  balVal.addEventListener("click", openBalanceEditor);
 }
 
 function renderTiles() {
@@ -893,52 +954,109 @@ function renderTiles() {
   const balVal = $("tiles").children[0].querySelector(".value");
   balVal.classList.add("editable");
   balVal.title = "Click to edit the current balance";
-  balVal.addEventListener("click", () => editBalance(balVal, current.balance));
+  balVal.addEventListener("click", openBalanceEditor);
 }
 
-function editBalance(div, current) {
-  if (div.querySelector("input")) return;
-  div.classList.remove("editable");
-  // period Sundays on the accrual grid, most recent first, back ~1 year
-  const latest = [...STATE.projection].filter(r => r.date <= STATE.today).pop();
-  const sundays = [];
-  // First run has no anchor and an empty projection; fall back to the grid.
-  const seed = latest ? latest.date
-                      : (STATE.anchor || latestPeriodSunday(STATE.today));
-  const d = parseISO(seed);
+/* ------------------------------------------- balance (anchor) editor */
+/* The anchor is a KNOWN balance on a KNOWN Sunday.  The old editor prefilled
+   the projected balance for today, so changing only the date silently
+   re-anchored a derived number and shifted the whole plan; and it committed
+   on blur, which a phone fires the moment the date picker opens.  Here the
+   two fields are edited together, the balance never changes by itself, and
+   nothing is saved until Save is pressed. */
+
+function periodSundayOptions() {
+  const out = [];
+  const d = parseISO(latestPeriodSunday(STATE.today));
   for (let i = 0; i < 27; i++) {
-    sundays.push(iso(d));
+    out.push(iso(d));
     d.setUTCDate(d.getUTCDate() - 14);
   }
-  const opts = sundays.map((s, i) =>
-      `<option value="${s}"${i === 0 ? " selected" : ""}>as of ${fmtDate(s)}</option>`).join("");
-  div.innerHTML = `<input type="number" step="0.01" min="-320" max="320"
-                    value="${current}"> h<br>
-                   <select style="font-size:13px;font-weight:400;margin-top:4px">${opts}</select>`;
-  const inp = div.querySelector("input");
-  const sel = div.querySelector("select");
-  inp.focus(); inp.select();
-  let done = false;
-  const commit = async () => {
-    if (done) return;
-    done = true;
-    const v = parseFloat(inp.value);
-    if (isNaN(v)) { renderTiles(); return; }
-    const out = await post("/api/anchor", {balance: v, date: sel.value});
-    if (out && out.ok) await refresh(); else renderTiles();
-  };
-  inp.addEventListener("keydown", e => {
-    if (e.key === "Enter") commit();
-    if (e.key === "Escape") { done = true; renderTiles(); }
-  });
-  sel.addEventListener("keydown", e => {
-    if (e.key === "Enter") commit();
-    if (e.key === "Escape") { done = true; renderTiles(); }
-  });
-  div.addEventListener("focusout", e => {
-    if (!div.contains(e.relatedTarget)) commit();
-  });
+  return out;
 }
+
+/* What the Current balance tile will read if this anchor is saved. */
+function anchorPreview(balance, date) {
+  if (!isFinite(balance) || !date) return null;
+  const rows = computeProjection(STATE.entries, STATE.today, date, balance,
+                                 STATE.hireDate, STATE.birthDate);
+  if (!rows.length) return null;
+  const cur = rows.filter(r => r.date <= STATE.today).pop() || rows[0];
+  return cur;
+}
+
+function updateAnchorPreview() {
+  const v = parseFloat($("anHours").value);
+  const when = $("anDate").value;
+  const box = $("anPreview");
+  if (!isFinite(v)) { box.textContent = ""; return; }
+  const cur = anchorPreview(v, when);
+  if (!cur) { box.textContent = ""; return; }
+  // typed value is hours; the result is shown in whatever unit the tile uses
+  const typed = `<b>${v.toFixed(2)} h</b>`;
+  const shown = `<b>${fmtU(cur.balance)} ${unitSuffix()}</b>`;
+  if (cur.date === when) {
+    box.innerHTML = `${typed} on ${fmtDate(when)} is the latest posted ` +
+                    `Sunday, so the tile will read ${shown}.`;
+    return;
+  }
+  box.innerHTML = `${typed} on ${fmtDate(when)} grows to ${shown} by ` +
+                  `${fmtDate(cur.date)}, which is what the tile will show.`;
+}
+
+function openBalanceEditor() {
+  const box = $("anchorEditor");
+  const sel = $("anDate");
+  const inp = $("anHours");
+  $("anErr").textContent = "";
+
+  const sundays = periodSundayOptions();
+  // the anchor's own date, if it is still on the grid, otherwise the latest
+  const want = STATE.anchor && sundays.indexOf(STATE.anchor) >= 0
+             ? STATE.anchor : sundays[0];
+  sel.innerHTML = sundays.map(d =>
+      `<option value="${d}"${d === want ? " selected" : ""}>` +
+      `${fmtDate(d)}</option>`).join("");
+
+  // Prefill the ANCHOR's balance, never the projected one: the pair the user
+  // last entered is the pair they are editing.  Raw hours, never fmtU --
+  // applyAnchor takes hours, so echoing the Units toggle here would save
+  // days as if they were hours.
+  inp.value = STATE.anchorBalance !== null && STATE.anchorBalance !== undefined
+            ? r2(STATE.anchorBalance).toFixed(2) : "";
+
+  box.style.display = "";
+  updateAnchorPreview();
+  // no autofocus on touch: the keyboard popping up hides the date field
+  if (!window.matchMedia("(pointer: coarse)").matches) { inp.focus(); inp.select(); }
+  box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function closeBalanceEditor() {
+  $("anchorEditor").style.display = "none";
+  $("anErr").textContent = "";
+}
+
+async function saveBalanceEditor() {
+  const v = parseFloat($("anHours").value);
+  if (!isFinite(v)) { $("anErr").textContent = "Enter a balance in hours."; return; }
+  const out = await post("/api/anchor", { balance: v, date: $("anDate").value });
+  if (out && out.ok) { closeBalanceEditor(); await refresh(); }
+  else $("anErr").textContent = (out && out.error) || "Could not save that balance.";
+}
+
+$("anHours").addEventListener("input", updateAnchorPreview);
+$("anDate").addEventListener("change", updateAnchorPreview);
+$("anSave").addEventListener("click", saveBalanceEditor);
+$("anCancel").addEventListener("click", closeBalanceEditor);
+$("anHours").addEventListener("keydown", e => {
+  if (e.key === "Enter") saveBalanceEditor();
+  if (e.key === "Escape") closeBalanceEditor();
+});
+$("anDate").addEventListener("keydown", e => {
+  if (e.key === "Enter") saveBalanceEditor();
+  if (e.key === "Escape") closeBalanceEditor();
+});
 
 /* ------------------------------------------------ calendar */
 function renderCalendar() {

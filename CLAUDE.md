@@ -32,7 +32,11 @@ Personal leave-planning app for mfuson (MITRE). **One build** as of
 
 ## Tests
 
-`node test/run.js` — all three suites (52 tests). Individually:
+`node test/run.js` — all four suites (136 tests). Individually:
+`ui.test.js` drives the real page in a browser (Playwright) and covers the
+balance editor, which no node-level suite can reach. It **skips itself**
+when Playwright is not installed, so the runner still works without it —
+if you want that coverage locally, `npm i -D playwright`.
 `calc.test.js` — characterization tests for the calc engine.
 `test/engine.js` extracts the engine straight out of `index.html` and runs it
 under node, so the tests always exercise the shipped code. A golden
