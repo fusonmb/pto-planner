@@ -32,7 +32,7 @@ Personal leave-planning app for mfuson (MITRE). **One build** as of
 
 ## Tests
 
-`node test/run.js` — all four suites (144 tests). Individually:
+`node test/run.js` — all four suites (153 tests). Individually:
 `ui.test.js` drives the real page in a browser (Playwright) and covers the
 balance editor, which no node-level suite can reach. It **skips itself**
 when Playwright is not installed, so the runner still works without it —
@@ -107,7 +107,17 @@ Shared:
   `‹ › Today` page the window a month at a time (`chartOffset`); the window
   is Horizon months wide plus a month of context behind. Paging is clamped
   to offsets that still leave two rows to draw — bounding it by date alone
-  let the window slide past the data and blank the chart.
+  let the window slide past the data and blank the chart. Today is
+  **disabled**, never hidden: hiding it reflowed the arrows beside it.
+- The chart can page back **before the anchor**. `computeHistory()` inverts
+  the accrual (`bal(S-14) = bal(S) + used(S) - rate(S)`), adding back leave
+  recorded in the Sheet, then re-walks forward and requires it to land on the
+  anchor. Those rows are `reconstructed: true` and drawn behind a shaded,
+  labelled divider — **tiles never use them**; a current balance must not
+  come from an inference. The inversion is exact only while the cap never
+  bound: past that, over-cap accrual was discarded and several histories
+  produce the same anchor, so rows going negative (the tell-tale of
+  anchoring at the cap) are trimmed rather than drawn.
 - Mobile (≤700px / coarse pointer): explanatory text hidden, tiles moved to
   bottom, shorter chart, bigger tap targets. Desktop must stay unchanged
   by mobile tweaks.

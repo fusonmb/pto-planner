@@ -400,6 +400,70 @@ check("setting the balance from setup mode leaves setup mode", () => {
   ok(after.projection.length > 0, "projection stayed empty");
 });
 
+/* ------------------------------------- reconstructed history */
+/* The walk is forward-only from the anchor by design, so balances before it
+   are inferred: invert the accrual, add back recorded leave. The inversion
+   is exact only while the cap never bound -- past that, over-cap accrual was
+   discarded and more than one history produces the same anchor. */
+
+check("history re-walked forward reproduces the projection", () => {
+  const E = loadEngine(null);
+  const entries = {"2026-05-04": {b: 8, nr: 0, label: "x"}};
+  const hist = E.computeHistory(entries, "2026-08-09", 150, null, null, 24);
+  ok(hist.length > 0, "no history produced");
+  const rw = E.computeProjection(entries, "2026-10-09", hist[0].date,
+                                 hist[0].balance, null, null);
+  const proj = E.computeProjection(entries, "2026-10-09", "2026-08-09", 150,
+                                   null, null);
+  near(rw.find(r => r.date === "2026-08-09").balance, 150, "lands on the anchor");
+  // Rows are stored rounded to 2dp, and the re-walk is re-seeded from one of
+  // those rounded values, so a row can land either side of a rounding
+  // boundary. A cent of an hour is the honest tolerance here; the app itself
+  // never re-seeds, it draws history and projection from the same pair.
+  for (const r of proj) {
+    const m = rw.find(x => x.date === r.date);
+    if (m && Math.abs(m.balance - r.balance) > 0.011)
+      throw new Error(`drift at ${r.date}: ${m.balance} vs ${r.balance}`);
+  }
+});
+
+check("leave recorded before the anchor raises the earlier balance", () => {
+  const E = loadEngine(null);
+  const week = {};
+  for (const d of ["2026-06-15", "2026-06-16", "2026-06-17",
+                   "2026-06-18", "2026-06-19"]) week[d] = {b: 8, nr: 0, label: ""};
+  const bare = E.computeHistory({}, "2026-08-09", 150, null, null, 6);
+  const took = E.computeHistory(week, "2026-08-09", 150, null, null, 6);
+  const at = (rows, d) => (rows.find(r => r.date === d) || {}).balance;
+  ok(at(bare, "2026-06-14") !== undefined, "fixture Sunday missing");
+  near(at(took, "2026-06-14") - at(bare, "2026-06-14"), 40,
+       "40 h of recorded leave not reflected before the anchor");
+  eq(took.find(r => r.date === "2026-06-28").used, 40, "the week posts on its Sunday");
+});
+
+check("history is flagged, ordered and never negative", () => {
+  const E = loadEngine(null);
+  const hist = E.computeHistory({}, "2026-08-09", 150, null, null, 24);
+  ok(hist.every(r => r.reconstructed === true), "a row is not flagged");
+  ok(hist.every(r => r.date < "2026-08-09"), "a row is not before the anchor");
+  ok(hist.every((r, i) => i === 0 || r.date > hist[i - 1].date), "out of order");
+  ok(hist.every(r => r.balance >= 0), "reconstructed a negative balance");
+});
+
+check("a deeper anchor supports more history than a shallow one", () => {
+  const E = loadEngine(null);
+  const deep = E.computeHistory({}, "2026-08-09", 150, null, null, 24);
+  const shallow = E.computeHistory({}, "2026-08-09", 40, null, null, 24);
+  ok(deep.length > shallow.length,
+     `deep ${deep.length} vs shallow ${shallow.length}`);
+});
+
+check("no anchor means no history", () => {
+  const E = loadEngine(null);
+  eq(E.computeHistory({}, null, null, null, null, 24).length, 0, "rows");
+  eq(E.computeHistory({}, "2026-08-09", NaN, null, null, 24).length, 0, "rows");
+});
+
 /* ---------------------------------------------------- report */
 
 console.log(`\n${pass} passed, ${failures.length} failed`);

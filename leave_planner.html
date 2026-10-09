@@ -462,6 +462,7 @@ const ACCRUAL_AFTER_9YRS = 8.0;           // rate after nine years employed
 const CAP_BASE = 240;
 const CAP_AFTER_9YRS = 320;
 const STEP_YEARS = 9;                     // years of service for the step-up
+const HISTORY_MONTHS = 24;                // how far back the chart may page
 const PARENTAL_TOTAL = 480;               // 12 weeks x 40 h per benefit year
 const MAX_DAY_HOURS = 8;                  // combined B + NR limit per day
 const PERIOD_DAYS = 14;
@@ -662,6 +663,81 @@ function computeProjection(entries, todayIso, anchorIso, anchorBal, hireIso,
   return rows;
 }
 
+/**
+ * Balances BEFORE the anchor, reconstructed from recorded leave.
+ *
+ * The anchor is a known balance on a known Sunday and the walk is
+ * forward-only by design, so nothing before it was ever drawn.  To page the
+ * chart back we invert the step: going back one period,
+ *     balance(S-14) = balance(S) + used(window ending S) - accrual(S)
+ * which holds exactly as long as the cap never bound in the span -- once a
+ * period was capped, the pre-cap figure is gone and the history below it is
+ * unknowable.
+ *
+ * So rather than trusting the inversion, it is only used to pick a starting
+ * balance; the ordinary forward walk then runs from there and must land back
+ * on the anchor.  If it does not, the cap bound somewhere and the span is
+ * halved until it does, or dropped.  Rows are flagged `reconstructed` -- they
+ * are inferred, not posted figures, and the chart says so.
+ */
+function computeHistory(entries, anchorIso, anchorBal, hireIso, birthIso,
+                        months) {
+  if (!anchorIso || !isFinite(anchorBal)) return [];
+  const nineYears = hireIso ? addYearsIso(hireIso, STEP_YEARS) : null;
+  const rateAt = s => (nineYears && s >= nineYears)
+      ? ACCRUAL_AFTER_9YRS : ACCRUAL_BASE;
+
+  // Sundays back from the anchor, far enough to cover `months`.
+  const wanted = Math.ceil(months * 365.25 / 12 / PERIOD_DAYS);
+
+  for (let periods = wanted; periods >= 1; periods = Math.floor(periods / 2)) {
+    const start = parseISO(anchorIso);
+    start.setUTCDate(start.getUTCDate() - periods * PERIOD_DAYS);
+    const startIso = iso(start);
+
+    // invert across the span to get the balance at startIso
+    let bal = anchorBal;
+    const d = parseISO(anchorIso);
+    for (let i = 0; i < periods; i++) {
+      const s1 = iso(d);
+      const s0 = iso(new Date(d.getTime() - (PERIOD_DAYS - 1) * 86400000));
+      let used = 0;
+      for (const [day, e] of Object.entries(entries)) {
+        if (day >= s0 && day <= s1) used += (e.b || 0);
+      }
+      bal = bal + used - rateAt(s1);
+      d.setUTCDate(d.getUTCDate() - PERIOD_DAYS);
+    }
+
+    // re-walk forward from there; it has to land on the anchor exactly
+    const rows = computeProjection(entries, anchorIso, startIso, bal,
+                                   hireIso, birthIso);
+    const landed = rows.find(r => r.date === anchorIso);
+    if (landed && Math.abs(landed.balance - anchorBal) < 0.005) {
+      let before = rows.filter(r => r.date < anchorIso);
+      // Landing on the anchor is not proof on its own: if the cap bound
+      // anywhere in the span, over-cap accrual was discarded and more than
+      // one past produces this anchor. Keep only the stretch since the cap
+      // last bit, which is the part the anchor actually determines.
+      let lastCapped = -1;
+      for (let i = 0; i < before.length; i++) if (before[i].lost > 0) lastCapped = i;
+      if (landed.lost > 0) before = [];
+      else if (lastCapped >= 0) before = before.slice(lastCapped + 1);
+
+      // The inversion assumes the cap never bound, so anchoring at or near
+      // the cap walks back into a deep negative balance that never happened
+      // -- the real past was flat against the cap, and which of the two it
+      // was is not recoverable. Stop where the reconstruction stops being
+      // plausible rather than drawing a fiction.
+      let firstSane = 0;
+      while (firstSane < before.length && before[firstSane].balance < 0) firstSane++;
+      before = before.slice(firstSane);
+      return before.map(r => Object.assign({}, r, {reconstructed: true}));
+    }
+  }
+  return [];                      // the cap bound too close to the anchor
+}
+
 function buildState() {
   const data = loadData();
   const today = localTodayIso();
@@ -682,6 +758,8 @@ function buildState() {
     holidays: mergedHolidays(data),
     projection: computeProjection(data.entries, today, anchorIso, anchorBal,
                                   hire, birth),
+    history: computeHistory(data.entries, anchorIso, anchorBal, hire, birth,
+                            HISTORY_MONTHS),
   };
 }
 
@@ -1292,10 +1370,17 @@ const monthsApart = (a, b) => {
          (y.getUTCMonth() - x.getUTCMonth());
 };
 
+/* The chart may page back before the anchor, so it draws the reconstructed
+   history ahead of the authoritative walk.  Tiles keep using STATE.projection
+   on its own -- a current balance must never come from an inference. */
+function chartSeries() {
+  return (STATE.history || []).concat(STATE.projection || []);
+}
+
 function rowsAtOffset(horizonMonths, offset) {
   const from = addMonthsIso(STATE.today, offset - 1);
   const to = addMonthsIso(STATE.today, offset + horizonMonths);
-  return STATE.projection.filter(r => r.date >= from && r.date <= to);
+  return chartSeries().filter(r => r.date >= from && r.date <= to);
 }
 
 /* How far the window may slide. Bounding by date alone allowed offsets whose
@@ -1303,7 +1388,7 @@ function rowsAtOffset(horizonMonths, offset) {
    so paging to the end emptied the chart. Walk the naive bounds inward until
    a real line is left to draw. */
 function chartBounds(horizonMonths) {
-  const proj = STATE.projection;
+  const proj = chartSeries();
   // first run: no anchor, so no projection and nothing to page through
   if (!proj.length) return {min: 0, max: 0};
   const today = STATE.today;
@@ -1317,7 +1402,7 @@ function chartBounds(horizonMonths) {
 /* Rows visible at a given month offset, with the offset clamped so paging
    stops at the ends of the projection instead of scrolling into blank. */
 function chartWindow(horizonMonths, offset) {
-  const proj = STATE.projection;
+  const proj = chartSeries();
   if (!proj.length) return {rows: [], offset: 0, min: 0, max: 0};
   const {min, max} = chartBounds(horizonMonths);
   const off = Math.max(min, Math.min(max, offset));
@@ -1328,7 +1413,8 @@ function updateChartNav(horizonMonths, rows) {
   const {min, max} = chartBounds(horizonMonths);
   $("chartPrev").disabled = chartOffset <= min;
   $("chartNext").disabled = chartOffset >= max;
-  $("chartToday").hidden = chartOffset === 0;
+  // disabled, never hidden: hiding it reflowed the buttons beside it
+  $("chartToday").disabled = chartOffset === 0;
   // "Nov '26", matching the x-axis -- "Nov 26" reads as a day of the month
   const span = (d) => {
     const dt = parseISO(d);
@@ -1460,6 +1546,20 @@ function renderChart() {
       // expiry: red dotted line where the remaining balance becomes zero
       s += `<line x1="${x(eT)}" x2="${x(eT)}" y1="${M.top}" y2="${H - M.bottom}"
              stroke="var(--critical)" stroke-width="1.5" stroke-dasharray="2 4"/>`;
+    }
+  }
+  // Where the posted figures begin.  Everything left of this is inferred by
+  // inverting the accrual from the anchor, so it must not read as fact.
+  if (STATE.anchor && STATE.history && STATE.history.length) {
+    const aT = parseISO(STATE.anchor).getTime();
+    if (aT > t0 && aT <= t1) {
+      const ax = x(aT);
+      s += `<rect x="${plotL}" y="${M.top}" width="${Math.max(0, ax - plotL)}"
+             height="${H - M.top - M.bottom}" fill="var(--ink)" opacity="0.05"/>`;
+      s += `<line x1="${ax}" x2="${ax}" y1="${M.top}" y2="${H - M.bottom}"
+             stroke="var(--axis)" stroke-width="1" stroke-dasharray="3 3"/>`;
+      s += `<text x="${ax - 4}" y="${M.top + 10}" text-anchor="end"
+             fill="var(--muted)" font-size="10">reconstructed</text>`;
     }
   }
   // PTOB series line (green)

@@ -165,7 +165,8 @@ const DEVICES = [
           .map(x => x.getAttribute("points") || "").join("|"));
       const r0 = await range(), l0 = await line();
       ok(/\u2013/.test(r0), "range label is empty: " + r0);
-      ok(await p.locator("#chartToday").isHidden(), "Today shown before paging");
+      ok(await p.locator("#chartToday").isVisible(), "Today vanished at the present");
+      ok(await p.locator("#chartToday").isDisabled(), "Today active at the present");
 
       await p.locator("#chartNext").click();
       await p.waitForTimeout(150);
@@ -173,7 +174,7 @@ const DEVICES = [
       // the dashed cap line is identical across windows, so compare the
       // balance polyline -- checking any <path> here proves nothing
       ok((await line()) !== l0, "the balance line did not redraw");
-      ok(await p.locator("#chartToday").isVisible(), "Today hidden after paging");
+      ok(await p.locator("#chartToday").isEnabled(), "Today still disabled after paging");
 
       await p.locator("#chartPrev").click();
       await p.waitForTimeout(150);
@@ -191,7 +192,47 @@ const DEVICES = [
       await p.locator("#chartToday").click();
       await p.waitForTimeout(150);
       eq(await range(), r0, "Today did not reset the window");
-      ok(await p.locator("#chartToday").isHidden(), "Today still offered at the present");
+      ok(await p.locator("#chartToday").isDisabled(), "Today still active at the present");
+      await ctx.close();
+    });
+
+    await check(tag + "the nav buttons never move", async () => {
+      // Today used to hide itself at offset 0, which reflowed the arrows
+      // beside it -- the button you were aiming at moved as you clicked.
+      const { ctx, p } = await page(dev, { leavePlannerData: seed() });
+      const boxes = async () => JSON.stringify(await p.evaluate(() =>
+        ["chartPrev", "chartNext", "chartToday"].map(id => {
+          const r = document.getElementById(id).getBoundingClientRect();
+          return [Math.round(r.x), Math.round(r.y), Math.round(r.width)];
+        })));
+      const before = await boxes();
+      await p.locator("#chartNext").click();
+      await p.waitForTimeout(150);
+      eq(await boxes(), before, "the nav buttons moved after paging");
+      await p.locator("#chartToday").click();
+      await p.waitForTimeout(150);
+      eq(await boxes(), before, "the nav buttons moved after Today");
+      await ctx.close();
+    });
+
+    await check(tag + "the chart pages back past the anchor", async () => {
+      const { ctx, p, errs } = await page(dev, { leavePlannerData: seed() });
+      // the seed anchors at 2026-08-09; paging back must reach earlier months
+      let seen = null;
+      for (let i = 0; i < 10; i++) {
+        await p.locator("#chartPrev").click({ force: true });
+        await p.waitForTimeout(60);
+      }
+      seen = (await p.locator("#chartRange").textContent()).trim();
+      ok(/'2[56]/.test(seen), "never paged back past the anchor: " + seen);
+      ok((await p.evaluate(() =>
+        document.querySelectorAll("#chart polyline").length)) > 0,
+        "no line drawn before the anchor");
+      const marked = await p.evaluate(() =>
+        [...document.querySelectorAll("#chart text")]
+          .some(t => /reconstructed/.test(t.textContent)));
+      ok(marked, "pre-anchor rows are not marked as reconstructed");
+      ok(errs.length === 0, "page errors: " + errs.join(" | "));
       await ctx.close();
     });
 
