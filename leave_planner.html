@@ -185,7 +185,11 @@
 
   /* ---- chart ---- */
   .chart-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-  .chart-head h2 { flex: 1; margin: 0; }
+  .chart-head h2 { margin: 0; }
+  .chart-nav { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .chart-nav .range { color: var(--muted); font-size: 13px;
+                      min-width: 9.5em; text-align: center; }
+  .chart-nav button[disabled] { opacity: .4; cursor: default; }
   select { background: var(--surface); color: var(--ink); font: inherit;
            border: 1px solid var(--border); border-radius: 7px; padding: 4px 8px; }
   #chartbox { position: relative; }
@@ -269,6 +273,11 @@
     .anchoredit .row:has(> button) { flex-direction: row; }
     .anchoredit .row > button { flex: 1 1 auto; padding: 10px 12px; }
     .anchoredit .hint { display: none; }
+    /* the chart header wraps on a phone; keep the nav usable */
+    .chart-head { flex-wrap: wrap; }
+    .chart-nav { width: 100%; margin-left: 0; }
+    .chart-nav .range { flex: 1; min-width: 0; }
+    .chart-nav button { padding: 6px 12px; }
     .tile { padding: 9px 10px; }
     .tile .value { font-size: 19px; }
     .cols { gap: 12px; }
@@ -393,6 +402,12 @@
     <div class="card">
       <div class="chart-head">
         <h2>Projected balance</h2>
+        <span class="chart-nav">
+          <button id="chartPrev" title="Back one month">&#8249;</button>
+          <span id="chartRange" class="range"></span>
+          <button id="chartNext" title="Forward one month">&#8250;</button>
+          <button id="chartToday" title="Jump back to today">Today</button>
+        </span>
         <label>Horizon
           <select id="horizon">
             <option value="6">6 months</option>
@@ -824,6 +839,7 @@ function applyAnchor({balance, date: when}) {
 /* ============================================================ UI */
 let STATE = null;
 let viewYear, viewMonth;          // calendar month being shown
+let chartOffset = 0;              // chart window, in months from today
 let selection = new Set();        // ISO dates currently selected
 let dragging = false, dragAnchor = null, dragMoved = false;
 // touch-only range selection (long-press to start, tap to finish)
@@ -1256,6 +1272,79 @@ function periodLabels(row) {
   return Object.entries(groups);
 }
 
+/* ---------------------------------------- chart window (month paging) */
+
+const addMonthsIso = (isoStr, n) => {
+  const d = parseISO(isoStr);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  // clamp to the end of a shorter month (Jan 31 + 1 month -> Feb 28)
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0))
+      .getUTCDate();
+  d.setUTCDate(Math.min(day, last));
+  return iso(d);
+};
+
+const monthsApart = (a, b) => {
+  const x = parseISO(a), y = parseISO(b);
+  return (y.getUTCFullYear() - x.getUTCFullYear()) * 12 +
+         (y.getUTCMonth() - x.getUTCMonth());
+};
+
+function rowsAtOffset(horizonMonths, offset) {
+  const from = addMonthsIso(STATE.today, offset - 1);
+  const to = addMonthsIso(STATE.today, offset + horizonMonths);
+  return STATE.projection.filter(r => r.date >= from && r.date <= to);
+}
+
+/* How far the window may slide. Bounding by date alone allowed offsets whose
+   window held one row or none, and renderChart blanks the SVG below two --
+   so paging to the end emptied the chart. Walk the naive bounds inward until
+   a real line is left to draw. */
+function chartBounds(horizonMonths) {
+  const proj = STATE.projection;
+  // first run: no anchor, so no projection and nothing to page through
+  if (!proj.length) return {min: 0, max: 0};
+  const today = STATE.today;
+  let min = monthsApart(today, proj[0].date) - horizonMonths;
+  let max = monthsApart(today, proj[proj.length - 1].date) + 1;
+  while (min < max && rowsAtOffset(horizonMonths, min).length < 2) min++;
+  while (max > min && rowsAtOffset(horizonMonths, max).length < 2) max--;
+  return {min, max};
+}
+
+/* Rows visible at a given month offset, with the offset clamped so paging
+   stops at the ends of the projection instead of scrolling into blank. */
+function chartWindow(horizonMonths, offset) {
+  const proj = STATE.projection;
+  if (!proj.length) return {rows: [], offset: 0, min: 0, max: 0};
+  const {min, max} = chartBounds(horizonMonths);
+  const off = Math.max(min, Math.min(max, offset));
+  return {rows: rowsAtOffset(horizonMonths, off), offset: off, min, max};
+}
+
+function updateChartNav(horizonMonths, rows) {
+  const {min, max} = chartBounds(horizonMonths);
+  $("chartPrev").disabled = chartOffset <= min;
+  $("chartNext").disabled = chartOffset >= max;
+  $("chartToday").hidden = chartOffset === 0;
+  // "Nov '26", matching the x-axis -- "Nov 26" reads as a day of the month
+  const span = (d) => {
+    const dt = parseISO(d);
+    return dt.toLocaleDateString("en-US", {timeZone: "UTC", month: "short"}) +
+           " '" + String(dt.getUTCFullYear()).slice(2);
+  };
+  $("chartRange").textContent = rows.length
+      ? span(rows[0].date) + " \u2013 " + span(rows[rows.length - 1].date)
+      : "no data in view";
+}
+
+function panChart(delta) {
+  chartOffset = delta === 0 ? 0 : chartOffset + delta;
+  renderChart();
+}
+
 function renderChart() {
   const svg = $("chart");
   const box = $("chartbox");
@@ -1268,9 +1357,14 @@ function renderChart() {
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
 
   const horizonMonths = +$("horizon").value;
-  const endD = parseISO(STATE.today);
-  endD.setUTCMonth(endD.getUTCMonth() + horizonMonths);
-  const rows = STATE.projection.filter(r => r.date <= iso(endD));
+  // The window is `horizon` months wide plus a month of context behind, and
+  // slides in whole months.  Row-bounded rather than date-bounded, so the
+  // axis ticks and the cap line keep working off rows[0]/rows[last] exactly
+  // as they did when the window was fixed.
+  const win = chartWindow(horizonMonths, chartOffset);
+  chartOffset = win.offset;                       // clamped to real data
+  const rows = win.rows;
+  updateChartNav(horizonMonths, rows);
   if (rows.length < 2) { svg.innerHTML = ""; return; }
 
   const t0 = parseISO(rows[0].date).getTime();
@@ -1481,6 +1575,9 @@ $("calGrid").addEventListener("contextmenu", e => {
 });
 window.addEventListener("resize", () => STATE && renderChart());
 $("horizon").addEventListener("change", () => { renderTiles(); renderChart(); });
+$("chartPrev").addEventListener("click", () => panChart(-1));
+$("chartNext").addEventListener("click", () => panChart(1));
+$("chartToday").addEventListener("click", () => panChart(0));
 $("prev").addEventListener("click", () => {
   viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; } renderCalendar();
 });

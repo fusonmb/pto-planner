@@ -32,7 +32,7 @@ Personal leave-planning app for mfuson (MITRE). **One build** as of
 
 ## Tests
 
-`node test/run.js` — all four suites (136 tests). Individually:
+`node test/run.js` — all four suites (144 tests). Individually:
 `ui.test.js` drives the real page in a browser (Playwright) and covers the
 balance editor, which no node-level suite can reach. It **skips itself**
 when Playwright is not installed, so the runner still works without it —
@@ -104,6 +104,10 @@ Shared:
   clickable points that jump the calendar to that period Sunday; stepped
   dashed cap line; month-boundary x-ticks with year-rollover labels; hover
   tooltips (per-Sunday breakdown incl. parental lines in pink).
+  `‹ › Today` page the window a month at a time (`chartOffset`); the window
+  is Horizon months wide plus a month of context behind. Paging is clamped
+  to offsets that still leave two rows to draw — bounding it by date alone
+  let the window slide past the data and blank the chart.
 - Mobile (≤700px / coarse pointer): explanatory text hidden, tiles moved to
   bottom, shorter chart, bigger tap targets. Desktop must stay unchanged
   by mobile tweaks.

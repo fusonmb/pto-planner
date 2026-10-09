@@ -158,6 +158,76 @@ const DEVICES = [
       await ctx.close();
     });
 
+    await check(tag + "the chart pages forward and back by a month", async () => {
+      const { ctx, p } = await page(dev, { leavePlannerData: seed() });
+      const range = async () => (await p.locator("#chartRange").textContent()).trim();
+      const line = () => p.evaluate(() => [...document.querySelectorAll("#chart polyline")]
+          .map(x => x.getAttribute("points") || "").join("|"));
+      const r0 = await range(), l0 = await line();
+      ok(/\u2013/.test(r0), "range label is empty: " + r0);
+      ok(await p.locator("#chartToday").isHidden(), "Today shown before paging");
+
+      await p.locator("#chartNext").click();
+      await p.waitForTimeout(150);
+      ok((await range()) !== r0, "range did not move forward");
+      // the dashed cap line is identical across windows, so compare the
+      // balance polyline -- checking any <path> here proves nothing
+      ok((await line()) !== l0, "the balance line did not redraw");
+      ok(await p.locator("#chartToday").isVisible(), "Today hidden after paging");
+
+      await p.locator("#chartPrev").click();
+      await p.waitForTimeout(150);
+      eq(await range(), r0, "a step back did not undo a step forward");
+      await ctx.close();
+    });
+
+    await check(tag + "Today returns the chart to the present", async () => {
+      const { ctx, p } = await page(dev, { leavePlannerData: seed() });
+      const range = async () => (await p.locator("#chartRange").textContent()).trim();
+      const r0 = await range();
+      for (let i = 0; i < 3; i++) await p.locator("#chartNext").click();
+      await p.waitForTimeout(150);
+      ok((await range()) !== r0, "paging had no effect");
+      await p.locator("#chartToday").click();
+      await p.waitForTimeout(150);
+      eq(await range(), r0, "Today did not reset the window");
+      ok(await p.locator("#chartToday").isHidden(), "Today still offered at the present");
+      await ctx.close();
+    });
+
+    await check(tag + "paging to either end stops, and never blanks the chart", async () => {
+      const { ctx, p, errs } = await page(dev, { leavePlannerData: seed() });
+      const lines = () => p.evaluate(() =>
+        document.querySelectorAll("#chart polyline").length);
+
+      for (let i = 0; i < 60; i++) await p.locator("#chartNext").click({ force: true });
+      await p.waitForTimeout(200);
+      ok(await p.locator("#chartNext").isDisabled(), "forward paging never stopped");
+      ok((await lines()) > 0, "chart blanked at the far end");
+
+      await p.locator("#chartToday").click();
+      for (let i = 0; i < 60; i++) await p.locator("#chartPrev").click({ force: true });
+      await p.waitForTimeout(200);
+      ok(await p.locator("#chartPrev").isDisabled(), "backward paging never stopped");
+      ok((await lines()) > 0, "chart blanked at the far start");
+
+      ok(errs.length === 0, "page errors: " + errs.join(" | "));
+      await ctx.close();
+    });
+
+    await check(tag + "changing the horizon keeps the window valid", async () => {
+      const { ctx, p } = await page(dev, { leavePlannerData: seed() });
+      for (let i = 0; i < 4; i++) await p.locator("#chartNext").click();
+      await p.locator("#horizon").selectOption("24");
+      await p.waitForTimeout(250);
+      const r = (await p.locator("#chartRange").textContent()).trim();
+      ok(/\u2013/.test(r), "range broke after a horizon change: " + r);
+      ok((await p.evaluate(() =>
+        document.querySelectorAll("#chart polyline").length)) > 0,
+        "chart blanked after a horizon change");
+      await ctx.close();
+    });
+
     await check(tag + "a first run with no anchor can set one", async () => {
       const { ctx, p, errs } = await page(dev,
         { leavePlannerData: seed({ anchor: null, hireDate: null }) });
