@@ -37,6 +37,7 @@
     --series:      #2a78d6;
     --leave-b:     #008300;   /* PTOB (B): green */
     --leave-nr:    #d55181;   /* Parental (NR): pink */
+    --leave-f:     #0a63c2;   /* Flex holiday (F): blue */
     --critical:    #d03b3b;
     --warning:     #b97f00;
     --hol-bg:      #e2f2e0;
@@ -55,6 +56,7 @@
     --series:      #3987e5;
     --leave-b:     #0ca30c;   /* PTOB (B): green, stepped for dark */
     --leave-nr:    #e87ba4;   /* Parental (NR): pink, stepped for dark */
+    --leave-f:     #4f9dff;   /* Flex holiday (F): blue, for dark */
     --critical:    #e66767;
     --warning:     #fab219;
     --hol-bg:      #1c2e1a;
@@ -133,8 +135,10 @@
          border-radius: 999px; padding: 0 7px; font-size: 11px; margin-top: 2px; }
   .pto.b  { background: var(--leave-b); }
   .pto.nr { background: var(--leave-nr); color: #1a1a19; }
+  .pto.f  { background: var(--leave-f); color: #ffffff; }
   button.saveb  { background: var(--leave-b); border-color: var(--leave-b); color: #fff; }
   button.savenr { background: var(--leave-nr); border-color: var(--leave-nr); color: #1a1a19; }
+  button.savef  { background: var(--leave-f); border-color: var(--leave-f); color: #ffffff; }
   .lbl { display: block; font-size: 10px; color: var(--ink-2); line-height: 1.25;
          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .holname { display: block; font-size: 10px; color: var(--hol-ink); line-height: 1.25;
@@ -205,6 +209,7 @@
   #tooltip .t-line.lost { color: var(--warning); }
   #tooltip .t-line.od   { color: var(--critical); font-weight: 600; }
   #tooltip .t-line.nr   { color: var(--leave-nr); }
+  #tooltip .t-line.f    { color: var(--leave-f); }
   .legend-note { color: var(--muted); font-size: 12px; margin-top: 4px; }
   svg text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif;
              font-variant-numeric: tabular-nums; fill: var(--muted); }
@@ -322,6 +327,8 @@
      <b style="color:var(--leave-nr)">Parental (NR), pink</b>:
      480 h (12 weeks) from the child's birth date, 1-h increments,
      expires one year after birth &middot;
+     <b style="color:var(--leave-f)">Flex (F), blue</b>:
+     two days each calendar year, lost if not taken by 31 December &middot;
      weekends &amp; holidays never receive leave; calendar shading
      alternates by pay period.
      Click a day &mdash; or click and drag &mdash; then Save.
@@ -384,6 +391,7 @@
         <div class="row">
           <button class="saveb" id="edSaveB">Save (PTOB)</button>
           <button class="savenr" id="edSaveNR">Save (Parent)</button>
+          <button class="savef" id="edSaveF">Save (Flex)</button>
           <button id="edClear">Clear</button>
         </div>
         <div class="row">
@@ -462,6 +470,10 @@ const ACCRUAL_AFTER_9YRS = 8.0;           // rate after nine years employed
 const CAP_BASE = 240;
 const CAP_AFTER_9YRS = 320;
 const STEP_YEARS = 9;                     // years of service for the step-up
+// Flex holiday (F): two days a calendar year, forfeited if unused. It is
+// a separate bucket -- it never touches the PTOB balance, so the accrual
+// walk is untouched by it; only the per-year pool needs tracking.
+const FLEX_PER_YEAR = 16;                 // 2 days x 8 h, no carryover
 const HISTORY_MONTHS = 24;                // how far back the chart may page
 const PARENTAL_TOTAL = 480;               // 12 weeks x 40 h per benefit year
 const MAX_DAY_HOURS = 8;                  // combined B + NR limit per day
@@ -518,12 +530,12 @@ function normalizeData(raw) {
   if (raw.birthDate && /^\d{4}-\d{2}-\d{2}$/.test(String(raw.birthDate)))
     data.birthDate = String(raw.birthDate);
   for (const [k, v] of Object.entries(raw.entries || {})) {
-    if (typeof v === "number") data.entries[k] = {b: v, nr: 0, label: ""};
-    else if (v && typeof v === "object" && ("b" in v || "nr" in v))
-      data.entries[k] = {b: +v.b || 0, nr: +v.nr || 0,
+    if (typeof v === "number") data.entries[k] = {b: v, nr: 0, f: 0, label: ""};
+    else if (v && typeof v === "object" && ("b" in v || "nr" in v || "f" in v))
+      data.entries[k] = {b: +v.b || 0, nr: +v.nr || 0, f: +v.f || 0,
                          label: String(v.label || "")};
     else if (v && typeof v === "object")   // 1.0 format: {hours, label}
-      data.entries[k] = {b: +v.hours || 0, nr: 0,
+      data.entries[k] = {b: +v.hours || 0, nr: 0, f: 0,
                          label: String(v.label || "")};
   }
   for (const [k, v] of Object.entries(raw.holidays || {}))
@@ -738,6 +750,19 @@ function computeHistory(entries, anchorIso, anchorBal, hireIso, birthIso,
   return [];                      // the cap bound too close to the anchor
 }
 
+/* Flex holiday is granted per calendar year and does not carry over, so the
+   pool is simply that year's bookings -- nothing to walk forward. */
+function flexUsed(entries, year) {
+  var t = 0;
+  for (const [d, e] of Object.entries(entries))
+    if (d.slice(0, 4) === String(year)) t += e.f || 0;
+  return r2(t);
+}
+
+function flexLeft(entries, year) {
+  return r2(Math.max(0, FLEX_PER_YEAR - flexUsed(entries, year)));
+}
+
 function buildState() {
   const data = loadData();
   const today = localTodayIso();
@@ -755,6 +780,9 @@ function buildState() {
     parentalExpiry: birth ? addYearsIso(birth, 1) : null,
     parentalTotal: PARENTAL_TOTAL,
     entries: data.entries,
+    flexPerYear: FLEX_PER_YEAR,
+    flexUsed: flexUsed(data.entries, today.slice(0, 4)),
+    flexLeft: flexLeft(data.entries, today.slice(0, 4)),
     holidays: mergedHolidays(data),
     projection: computeProjection(data.entries, today, anchorIso, anchorBal,
                                   hire, birth),
@@ -767,7 +795,7 @@ function buildState() {
 function applyEntry({dates, hours, label, leaveType, clear}) {
   { const ro = readOnlyBlock(); if (ro) return ro; }
   const leave = (leaveType || "B").toUpperCase();
-  if (leave !== "B" && leave !== "NR")
+  if (leave !== "B" && leave !== "NR" && leave !== "F")
     return {ok: false, error: "Unknown leave type."};
   if (!(hours >= 0 && hours <= MAX_DAY_HOURS))
     return {ok: false, error: `Hours must be 0-${MAX_DAY_HOURS} — a day `
@@ -794,7 +822,34 @@ function applyEntry({dates, hours, label, leaveType, clear}) {
         : `Dates on or before ${anchorIso} are already reflected in the `
           + "starting balance."};
   let windowSkipped = [], unfilled = 0, clamped = 0, fullSkipped = 0;
-  const nrFill = {};
+  const nrFill = {}, fFill = {};
+  if (leave === "F" && !clear && hours > 0) {
+    // One pool per calendar year, so a range spanning New Year draws on both.
+    const sel = new Set(valid);
+    const usedByYear = {};
+    for (const [k, e] of Object.entries(data.entries)) {
+      if (sel.has(k)) continue;
+      const y = k.slice(0, 4);
+      usedByYear[y] = (usedByYear[y] || 0) + (e.f || 0);
+    }
+    const budget = {};
+    for (const d of [...valid].sort()) {
+      const y = d.slice(0, 4);
+      if (!(y in budget)) budget[y] = FLEX_PER_YEAR - (usedByYear[y] || 0);
+      const cur = data.entries[d] || {};
+      const room = MAX_DAY_HOURS - ((cur.b || 0) + (cur.nr || 0));
+      if (room <= 0) { fullSkipped++; continue; }
+      const give = Math.min(hours, budget[y], room);
+      if (give > 0) {
+        fFill[d] = r2(give);
+        budget[y] -= give;
+        if (give < hours) clamped++;
+      } else unfilled++;
+    }
+    if (!Object.keys(fFill).length)
+      return {ok: false, error: "Nothing to book — the selected day(s) are "
+            + "full, or no flex holiday is left in that calendar year."};
+  }
   if (leave === "NR" && !clear && hours > 0) {
     const birth = effectiveBirth(data);
     if (!birth)
@@ -815,7 +870,8 @@ function applyEntry({dates, hours, label, leaveType, clear}) {
     let budget = PARENTAL_TOTAL - otherNR;
     for (const d of [...valid].sort()) {
       const curB = (data.entries[d] || {}).b || 0;
-      const room = Math.floor(MAX_DAY_HOURS - curB);   // 8 h/day combined
+      const curF = (data.entries[d] || {}).f || 0;
+      const room = Math.floor(MAX_DAY_HOURS - curB - curF); // 8 h/day combined
       if (room < 1) { fullSkipped++; continue; }
       const give = Math.min(hours, Math.floor(budget), room); // whole hours
       if (give >= 1) {
@@ -830,17 +886,21 @@ function applyEntry({dates, hours, label, leaveType, clear}) {
   for (const d of valid) {
     if (clear) { delete data.entries[d]; continue; }
     if (leave === "NR" && hours > 0 && !(d in nrFill)) continue;
-    const e = data.entries[d] || {b: 0, nr: 0, label: ""};
+    if (leave === "F" && hours > 0 && !(d in fFill)) continue;
+    const e = data.entries[d] || {b: 0, nr: 0, f: 0, label: ""};
     if (leave === "B") {
-      const give = Math.min(hours, MAX_DAY_HOURS - (e.nr || 0)); // 8 h/day
+      // 8 h/day is the combined total across every type
+      const give = Math.min(hours, MAX_DAY_HOURS - (e.nr || 0) - (e.f || 0));
       if (hours > 0 && give <= 0) { fullSkipped++; continue; }
       if (hours > 0 && give < hours) clamped++;
       e.b = hours > 0 ? r2(Math.max(0, give)) : 0;
+    } else if (leave === "F") {
+      e.f = hours > 0 ? fFill[d] : 0;
     } else {
       e.nr = hours > 0 ? nrFill[d] : 0;
     }
     e.label = label.slice(0, 80);
-    if (e.b <= 0 && e.nr <= 0 && !e.label) delete data.entries[d];
+    if (e.b <= 0 && e.nr <= 0 && !(e.f > 0) && !e.label) delete data.entries[d];
     else data.entries[d] = e;
   }
   saveData(data);
@@ -1038,6 +1098,15 @@ function renderTiles() {
                 note: "after planned days · expires " + fmtDate(STATE.parentalExpiry),
                 bad: rem <= 0});
   }
+  // Flex is use-it-or-lose-it, so the tile names the deadline, not a date
+  // the leave expires on: the whole pool goes at midnight on 31 December.
+  if (STATE.flexLeft > 0 || STATE.flexUsed > 0) {
+    tiles.push({label: "Flex holiday left",
+                value: fmtU(STATE.flexLeft) + " " + unitSuffix(),
+                note: "of " + fmtU(STATE.flexPerYear) + " " + unitSuffix()
+                      + " this year · lost after Dec 31",
+                bad: STATE.flexLeft <= 0});
+  }
   if (firstOver) tiles.push({label: "Overdrawn",
                              value: fmtU(firstOver.balance) + " " + unitSuffix(),
                              note: "period of " + fmtDate(firstOver.date), bad: true});
@@ -1179,6 +1248,8 @@ function renderCalendar() {
       inner += `<span class="pto b" title="PTOB">${fmtU(e.b)}${unitSuffix()}</span>`;
     if (e && e.nr > 0)
       inner += `<span class="pto nr" title="Parental leave">${fmtU(e.nr)}${unitSuffix()}</span>`;
+    if (e && e.f > 0)
+      inner += `<span class="pto f" title="Flex holiday">${fmtU(e.f)}${unitSuffix()}</span>`;
     if (e && e.label) inner += `<span class="lbl" title="${esc(e.label)}">${esc(e.label)}</span>`;
     if (STATE.holidays[ds])
       inner += `<span class="holname">${esc(STATE.holidays[ds].name)}</span>`;
@@ -1690,6 +1761,7 @@ $("todayBtn").addEventListener("click", () => {
 });
 $("edSaveB").addEventListener("click", () => saveLeave("B"));
 $("edSaveNR").addEventListener("click", () => saveLeave("NR"));
+$("edSaveF").addEventListener("click", () => saveLeave("F"));
 $("edClear").addEventListener("click", clearDays);
 $("edHours").addEventListener("keydown", e => {
   if (e.key === "Enter") saveLeave("B");
@@ -1768,7 +1840,7 @@ function syncBar(kind, msg) {
    every control that would write is disabled. */
 function applyReadOnly() {
   if (!STORE || !STORE.isSheet() || STORE.canEdit()) return;
-  for (const id of ["edSaveB", "edSaveNR", "edClear", "edHoliday",
+  for (const id of ["edSaveB", "edSaveNR", "edSaveF", "edClear", "edHoliday",
                     "edUnholiday", "restoreBtn", "hireDate", "birthDate",
                     "birthClear"]) {
     const el = $(id);

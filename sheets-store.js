@@ -517,6 +517,7 @@ var LeaveStore = (function () {
   function fieldOf(type) {
     if (type.model === "biweekly") return "b";
     if (type.model === "grant") return "nr";
+    if (type.model === "annual") return "f";   // granted per calendar year
     return null;
   }
 
@@ -530,7 +531,7 @@ var LeaveStore = (function () {
       var r = rows[i];
       var d = isoOf(r[0]);
       if (!d) continue;
-      var day = data.entries[d] || { b: 0, nr: 0, label: "" };
+      var day = data.entries[d] || { b: 0, nr: 0, f: 0, label: "" };
       for (var c = 0; c < act.length; c++) {
         var f = fieldOf(act[c]);
         var h = num(r[1 + c]);
@@ -538,7 +539,7 @@ var LeaveStore = (function () {
       }
       var label = r[1 + act.length];
       if (label) day.label = String(label).slice(0, 80);
-      if (day.b || day.nr || day.label) data.entries[d] = day;
+      if (day.b || day.nr || day.f || day.label) data.entries[d] = day;
     }
   }
 
@@ -830,6 +831,7 @@ var LeaveStore = (function () {
     _internals: { readLeaveInto: readLeaveInto, readHolidaysInto: readHolidaysInto,
                   readConfigInto: readConfigInto, readTypes: readTypes,
                   leaveRows: leaveRows, holidayRows: holidayRows,
+                  fieldOf: fieldOf,
                   emptyData: emptyData, isoOf: isoOf,
                   loadPicker: loadPicker, pickShared: pickShared,
                   useFile: useFile, openOwn: openOwn,

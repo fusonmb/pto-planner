@@ -41,17 +41,17 @@ check("leave rows parse into the per-day entry shape", () => {
     ["2026-08-20", 4, 4, "half day", "x"],
     ["2026-09-08", 0, 8, "parental", "x"],
   ], TYPES, data);
-  eq(data.entries["2026-08-19"], { b: 8, nr: 0, label: "dentist" }, "PTOB day");
-  eq(data.entries["2026-08-20"], { b: 4, nr: 4, label: "half day" }, "split day");
-  eq(data.entries["2026-09-08"], { b: 0, nr: 8, label: "parental" }, "parental day");
+  eq(data.entries["2026-08-19"], { b: 8, nr: 0, f: 0, label: "dentist" }, "PTOB day");
+  eq(data.entries["2026-08-20"], { b: 4, nr: 4, f: 0, label: "half day" }, "split day");
+  eq(data.entries["2026-09-08"], { b: 0, nr: 8, f: 0, label: "parental" }, "parental day");
 });
 
 check("a day is round-tripped through the Sheet unchanged", () => {
   const before = I.emptyData();
   before.entries = {
-    "2026-08-19": { b: 8, nr: 0, label: "dentist" },
-    "2026-08-20": { b: 4, nr: 4, label: "half day" },
-    "2026-09-08": { b: 0, nr: 8, label: "parental" },
+    "2026-08-19": { b: 8, nr: 0, f: 0, label: "dentist" },
+    "2026-08-20": { b: 4, nr: 4, f: 0, label: "half day" },
+    "2026-09-08": { b: 0, nr: 8, f: 0, label: "parental" },
   };
   const grid = I.leaveRows(before, TYPES);
   const after = I.emptyData();
@@ -61,7 +61,7 @@ check("a day is round-tripped through the Sheet unchanged", () => {
 
 check("the shared label survives -- it is not duplicated per type", () => {
   const data = I.emptyData();
-  data.entries = { "2026-08-20": { b: 4, nr: 4, label: "half day" } };
+  data.entries = { "2026-08-20": { b: 4, nr: 4, f: 0, label: "half day" } };
   const grid = I.leaveRows(data, TYPES);
   eq(grid[0], ["Date", "PTOB", "Parental", "Label", "Updated"], "header");
   eq(grid[1].slice(0, 4), ["2026-08-20", 4, 4, "half day"], "one row, one label");
@@ -133,7 +133,7 @@ check("blank and malformed leave rows are skipped, not crashed on", () => {
   ], TYPES, data);
   ok(!data.entries[""], "blank row created an entry");
   eq(data.entries["2026-08-19"], undefined, "empty day should not be stored");
-  eq(data.entries["2026-08-21"], { b: 8, nr: 0, label: "typed as text" },
+  eq(data.entries["2026-08-21"], { b: 8, nr: 0, f: 0, label: "typed as text" },
      "numbers entered as text");
 });
 
@@ -153,7 +153,7 @@ check("a type added to the registry gets its own column", () => {
   const types = TYPES.concat([
     { key: "Sick", label: "Sick", model: "none", active: true }]);
   const data = I.emptyData();
-  data.entries = { "2026-08-19": { b: 8, nr: 0, label: "" } };
+  data.entries = { "2026-08-19": { b: 8, nr: 0, f: 0, label: "" } };
   const grid = I.leaveRows(data, types);
   eq(grid[0], ["Date", "PTOB", "Parental", "Sick", "Label", "Updated"],
      "new column appears with no deploy");
@@ -172,7 +172,7 @@ const withEntries = (n) => {
   const d = I.emptyData();
   for (let i = 0; i < n; i++) {
     d.entries[`2026-09-${String(i + 1).padStart(2, "0")}`] =
-      { b: 8, nr: 0, label: "" };
+      { b: 8, nr: 0, f: 0, label: "" };
   }
   return d;
 };
@@ -334,6 +334,45 @@ check("needsAPick matches the messages the store actually produces", () => {
      "needsAPick fires on an auth error");
   ok(!needsAPick(new Error("Google sign-in expired — sign in again.")),
      "needsAPick fires on an expired session");
+});
+
+/* ------------------------------------------- flex holiday column */
+/* The Leave tab has one column per active registry type, mapped by model.
+   A model the mapper does not know writes 0 into the Sheet instead of the
+   hours -- silent data loss, so the mapping is pinned here. */
+
+const TYPES_WITH_FLEX = [
+  {key: "PTOB", label: "PTOB", model: "biweekly", active: true},
+  {key: "Parental", label: "Parental", model: "grant", active: true},
+  {key: "Flex", label: "Flex", model: "annual", active: true},
+];
+
+check("the annual model maps to the flex field", () => {
+  eq(I.fieldOf({model: "annual"}), "f", "annual");
+  eq(I.fieldOf({model: "biweekly"}), "b", "biweekly");
+  eq(I.fieldOf({model: "grant"}), "nr", "grant");
+});
+
+check("a flex day round-trips through the Leave tab", () => {
+  const day = {b: 0, nr: 0, f: 8, label: "flex day"};
+  const rows = I.leaveRows({entries: {"2026-11-23": day}}, TYPES_WITH_FLEX);
+  eq(rows[0], ["Date", "PTOB", "Parental", "Flex", "Label", "Updated"], "header");
+  const body = rows[1];
+  eq(body[3], 8, "flex hours were not written: " + JSON.stringify(body));
+
+  const back = I.emptyData();
+  I.readLeaveInto(rows, TYPES_WITH_FLEX, back);
+  eq(back.entries["2026-11-23"].f, 8, "flex hours did not come back");
+  eq(back.entries["2026-11-23"].b, 0, "PTOB was invented");
+});
+
+check("a day carrying only flex is not dropped on read", () => {
+  const rows = [["Date", "PTOB", "Parental", "Flex", "Label", "Updated"],
+                ["2026-11-23", 0, 0, 8, "", ""]];
+  const back = I.emptyData();
+  I.readLeaveInto(rows, TYPES_WITH_FLEX, back);
+  ok(back.entries["2026-11-23"], "a flex-only day was discarded");
+  eq(back.entries["2026-11-23"].f, 8, "flex hours");
 });
 
 /* ----------------------------------------------- Config round-trip */
@@ -632,7 +671,7 @@ asyncCheck("a moved Sheet is reported as changed", async () => {
 asyncCheck("unsaved local edits turn a move into a conflict", async () => {
   await connectedStore("rev-1", { remote: "rev-2" });
   const d = I.emptyData();
-  d.entries["2026-09-01"] = { b: 8, nr: 0, label: "mine" };
+  d.entries["2026-09-01"] = { b: 8, nr: 0, f: 0, label: "mine" };
   S.write(d);                                    // marks dirty
   const r = await S.pollRemote();
   eq(r.state, "conflict", "poll state");
@@ -641,7 +680,7 @@ asyncCheck("unsaved local edits turn a move into a conflict", async () => {
 asyncCheck("a pull refuses to discard unsaved edits", async () => {
   await connectedStore("rev-1", { remote: "rev-2" });
   const d = I.emptyData();
-  d.entries["2026-09-01"] = { b: 8, nr: 0, label: "mine" };
+  d.entries["2026-09-01"] = { b: 8, nr: 0, f: 0, label: "mine" };
   S.write(d);
   const p = await S.pull();
   if (p.state === "pulled")

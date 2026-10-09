@@ -105,7 +105,7 @@ check("accrual and cap step up at the nine-year mark", () => {
 
 check("usage is subtracted before accrual, so leave frees cap headroom", () => {
   // seed just under the cap, then take 8 h inside one period
-  const rows = project({ "2026-08-05": { b: 8, nr: 0, label: "" } },
+  const rows = project({ "2026-08-05": { b: 8, nr: 0, f: 0, label: "" } },
                        { balance: 238 });
   const r = rowAt(rows, "2026-08-09");
   eq(r.used, 8, "usage in the window");
@@ -123,8 +123,8 @@ check("accrual above the cap is lost, not banked", () => {
 
 check("the period window is the 14 days ending on the posting Sunday", () => {
   const rows = project({
-    "2026-07-27": { b: 8, nr: 0, label: "" },   // day after the anchor
-    "2026-08-07": { b: 8, nr: 0, label: "" },   // Friday inside the window
+    "2026-07-27": { b: 8, nr: 0, f: 0, label: "" },   // day after the anchor
+    "2026-08-07": { b: 8, nr: 0, f: 0, label: "" },   // Friday inside the window
   });
   eq(rowAt(rows, "2026-08-09").used, 16, "both days land in one window");
   eq(rowAt(rows, "2026-08-23").used, 0, "next window is clean");
@@ -133,7 +133,7 @@ check("the period window is the 14 days ending on the posting Sunday", () => {
 check("PTOB may go negative and is flagged overdrawn", () => {
   const entries = {};
   for (const d of ["2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06",
-                   "2026-08-07"]) entries[d] = { b: 8, nr: 0, label: "" };
+                   "2026-08-07"]) entries[d] = { b: 8, nr: 0, f: 0, label: "" };
   const rows = project(entries, { balance: 10 });
   const r = rowAt(rows, "2026-08-09");
   eq(r.used, 40, "week of leave");
@@ -159,7 +159,7 @@ check("parental expiry is exactly one year after birth, Feb 29 clamped", () => {
 
 check("parental draws down the 480 h pool and never goes negative", () => {
   const birth = "2026-08-01";
-  const entries = { "2026-08-05": { b: 0, nr: 8, label: "" } };
+  const entries = { "2026-08-05": { b: 0, nr: 8, f: 0, label: "" } };
   const rows = project(entries, { birth, today: "2026-09-01" });
   eq(rowAt(rows, "2026-08-09").nrRemaining, 472, "pool after 8 h");
   ok(rows.every((r) => r.nrRemaining === null || r.nrRemaining >= 0),
@@ -276,7 +276,7 @@ check("the label is shared per day across both leave types", () => {
   e.applyEntry({ dates: ["2026-08-19"], hours: 4, label: "half day", leaveType: "B" });
   e.applyEntry({ dates: ["2026-08-19"], hours: 4, label: "half day", leaveType: "NR" });
   const day = e.store.raw().entries["2026-08-19"];
-  eq(day, { b: 4, nr: 4, label: "half day" }, "day should carry both types");
+  eq(day, { b: 4, nr: 4, f: 0, label: "half day" }, "day should carry both types");
 });
 
 /* ---------------------------------------------------- re-anchoring */
@@ -400,6 +400,71 @@ check("setting the balance from setup mode leaves setup mode", () => {
   ok(after.projection.length > 0, "projection stayed empty");
 });
 
+/* ------------------------------------------- flex holiday (F) */
+/* Two days a calendar year, forfeited if unused. It is a separate bucket --
+   it must not touch the PTOB balance -- but it shares the 8 h/day ceiling. */
+
+const flexEngine = () => loadEngine({
+  entries: {}, holidays: {}, removedHolidays: [],
+  anchor: {date: "2026-08-09", balance: 150}, hireDate: null, birthDate: null,
+});
+
+check("two flex days a year, and no more", () => {
+  const E = flexEngine();
+  const left = () => E.flexLeft(E.loadData().entries, 2026);
+  eq(left(), 16, "pool at the start");
+  ok(E.applyEntry({dates: ["2026-11-23"], hours: 8, label: "", leaveType: "F"}).ok, "first day");
+  eq(left(), 8, "after one day");
+  ok(E.applyEntry({dates: ["2026-11-24"], hours: 8, label: "", leaveType: "F"}).ok, "second day");
+  eq(left(), 0, "after two days");
+  const third = E.applyEntry({dates: ["2026-11-25"], hours: 8, label: "", leaveType: "F"});
+  ok(!third.ok, "a third day was allowed");
+  ok(/flex holiday is left/i.test(third.error), "unhelpful refusal: " + third.error);
+});
+
+check("the pool resets each calendar year and never carries over", () => {
+  const E = flexEngine();
+  E.applyEntry({dates: ["2026-11-23"], hours: 8, label: "", leaveType: "F"});
+  eq(E.flexLeft(E.loadData().entries, 2026), 8, "2026 after one day");
+  eq(E.flexLeft(E.loadData().entries, 2027), 16, "2027 starts full");
+  ok(E.applyEntry({dates: ["2027-01-04"], hours: 8, label: "", leaveType: "F"}).ok, "2027 booking");
+  eq(E.flexLeft(E.loadData().entries, 2027), 8, "2027 after one day");
+  // an unused 2026 day must not appear in 2027
+  eq(E.flexLeft(E.loadData().entries, 2026), 8, "2026 changed by a 2027 booking");
+});
+
+check("flex does not touch the PTOB balance", () => {
+  const E = flexEngine();
+  const before = E.buildState().projection.map(r => r.balance).join(",");
+  ok(E.applyEntry({dates: ["2026-11-23"], hours: 8, label: "", leaveType: "F"}).ok, "booking");
+  const after = E.buildState().projection.map(r => r.balance).join(",");
+  eq(after, before, "the accrual walk moved");
+});
+
+check("flex shares the 8 h a day ceiling", () => {
+  const E = flexEngine();
+  E.applyEntry({dates: ["2026-11-23"], hours: 4, label: "half", leaveType: "B"});
+  E.applyEntry({dates: ["2026-11-23"], hours: 8, label: "flex", leaveType: "F"});
+  const day = E.loadData().entries["2026-11-23"];
+  eq(day.b + day.f, 8, "the day holds more than 8 h: " + JSON.stringify(day));
+  eq(day.f, 4, "flex was not clamped to the room left");
+});
+
+check("flex never lands on a weekend or a holiday", () => {
+  const E = flexEngine();
+  const sat = E.applyEntry({dates: ["2026-11-21"], hours: 8, label: "", leaveType: "F"});
+  ok(!sat.ok, "booked a Saturday");
+  ok(/weekend/i.test(sat.error), "wrong refusal: " + sat.error);
+});
+
+check("a flex day survives being written and read back", () => {
+  const E = flexEngine();
+  E.applyEntry({dates: ["2026-11-23"], hours: 8, label: "flex", leaveType: "F"});
+  const day = E.loadData().entries["2026-11-23"];
+  eq(day.f, 8, "f did not persist — check normalizeData");
+  eq(day.b, 0, "PTOB was charged for a flex day");
+});
+
 /* ------------------------------------- reconstructed history */
 /* The walk is forward-only from the anchor by design, so balances before it
    are inferred: invert the accrual, add back recorded leave. The inversion
@@ -408,7 +473,7 @@ check("setting the balance from setup mode leaves setup mode", () => {
 
 check("history re-walked forward reproduces the projection", () => {
   const E = loadEngine(null);
-  const entries = {"2026-05-04": {b: 8, nr: 0, label: "x"}};
+  const entries = {"2026-05-04": {b: 8, nr: 0, f: 0, label: "x"}};
   const hist = E.computeHistory(entries, "2026-08-09", 150, null, null, 24);
   ok(hist.length > 0, "no history produced");
   const rw = E.computeProjection(entries, "2026-10-09", hist[0].date,
@@ -431,7 +496,7 @@ check("leave recorded before the anchor raises the earlier balance", () => {
   const E = loadEngine(null);
   const week = {};
   for (const d of ["2026-06-15", "2026-06-16", "2026-06-17",
-                   "2026-06-18", "2026-06-19"]) week[d] = {b: 8, nr: 0, label: ""};
+                   "2026-06-18", "2026-06-19"]) week[d] = {b: 8, nr: 0, f: 0, label: ""};
   const bare = E.computeHistory({}, "2026-08-09", 150, null, null, 6);
   const took = E.computeHistory(week, "2026-08-09", 150, null, null, 6);
   const at = (rows, d) => (rows.find(r => r.date === d) || {}).balance;

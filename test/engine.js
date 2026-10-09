@@ -78,6 +78,7 @@ function extract(src) {
     "ORIGINAL_ANCHOR", "ACCRUAL_BASE", "ACCRUAL_AFTER_9YRS",
     "CAP_BASE", "CAP_AFTER_9YRS", "STEP_YEARS", "PARENTAL_TOTAL",
     "MAX_DAY_HOURS", "PERIOD_DAYS", "BUILTIN_HOLIDAYS", "STORE_KEY",
+    "FLEX_PER_YEAR",
     "iso", "parseISO", "isWeekend", "periodIndex", "r2",
   ];
   const epilogue = EXPORTS.map((n) => `globalThis.${n} = ${n};`).join("\n");

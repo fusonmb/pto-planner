@@ -32,7 +32,7 @@ Personal leave-planning app for mfuson (MITRE). **One build** as of
 
 ## Tests
 
-`node test/run.js` — all four suites (153 tests). Individually:
+`node test/run.js` — all four suites (162 tests). Individually:
 `ui.test.js` drives the real page in a browser (Playwright) and covers the
 balance editor, which no node-level suite can reach. It **skips itself**
 when Playwright is not installed, so the runner still works without it —
@@ -76,8 +76,23 @@ Parental (NR) — pink (`--leave-nr`):
   outside the window, and report notes — they don't hard-fail unless
   nothing can be booked.
 
+Flex holiday (F) — blue (`--leave-f`):
+- **Two days (16 h) per calendar year, forfeited if unused.** No carryover of
+  any kind: each calendar year gets its own pool and whatever is left dies on
+  31 December. A range spanning New Year draws on both years' pools.
+- A **separate bucket**: it never touches the PTOB balance, so the accrual
+  walk is untouched by it and `computeProjection` knows nothing about it.
+  Only the per-year pool is tracked (`flexUsed` / `flexLeft`).
+- Shares the 8 h/day ceiling and the weekend/holiday rules with the others.
+- Registry model is `annual`, mapping to the entry field `f`. `fieldOf`
+  maps by **model**, so a model it does not know writes 0 into the Sheet
+  rather than the hours — silent data loss, pinned by a test.
+
 Shared:
-- A day holds max 8 h combined (B + NR); saves clamp to remaining room,
+- Entry shape is `{b, nr, f, label}`. `normalizeData()` is the gate: it
+  rebuilds every entry and **drops any field it does not name**, so a new
+  leave type must be added there or it vanishes on the next load.
+- A day holds max 8 h combined (B + NR + F); saves clamp to remaining room,
   skip full days, with notes.
 - Weekends and holidays NEVER receive leave (auto-skipped; single-day
   attempts rejected). Company holidays 2026–2030 are hardcoded
@@ -85,7 +100,7 @@ Shared:
   Mon Jan 14 as the holiday even though MLK 2030 is Jan 21 — transcribed
   as printed). Custom holidays add/remove via editor; removals of builtins
   tracked in `removedHolidays`.
-- Entries: `{date: {b: hours, nr: hours, label}}`. Label shared per day.
+- Entries: `{date: {b, nr, f, label}}`. Label shared per day.
 - Clear removes the whole day (both types + label).
 
 ## UI conventions

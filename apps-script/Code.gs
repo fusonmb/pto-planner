@@ -48,6 +48,7 @@ var THEME = {
   band: '#f4f6f8',
   ptob: '#2f9e5f',
   parental: '#e05b8a',
+  flex: '#0a63c2',
   muted: '#6b7785',
 };
 
@@ -69,6 +70,9 @@ var TYPE_HEADERS = ['Key', 'Label', 'Color', 'Model', 'Rate', 'RateAfter',
 var TYPE_DEFAULTS = [
   ['PTOB', 'PTOB', THEME.ptob, 'biweekly', 6.7692, 8.0, 9, 240, 320, '', '', false, true],
   ['Parental', 'Parental', THEME.parental, 'grant', '', '', '', '', '', 480, 12, true, true],
+  // Flex holiday: two days a calendar year, forfeited if unused. 'annual'
+  // is a per-calendar-year grant -- no carryover, so no expiry months.
+  ['Flex', 'Flex', THEME.flex, 'annual', '', '', '', '', '', 16, '', false, true],
 ];
 
 // ============================================================
@@ -283,6 +287,7 @@ function activeTypes_(types) {
 function fieldOf_(type) {
   if (type.model === 'biweekly') return 'b';
   if (type.model === 'grant') return 'nr';
+  if (type.model === 'annual') return 'f';   // granted per calendar year
   return null;
 }
 
