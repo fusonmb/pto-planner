@@ -48,6 +48,7 @@ var LeaveStore = (function () {
     canEdit: true,
     revision: null,       // Drive headRevisionId seen at last read
     configGrid: null,     // Config tab as last read, for merging
+    typesGrid: null,      // LeaveTypes tab as last read, likewise
     cache: null,
     types: [],
     pending: null,        // in-flight flush, so saves serialize
@@ -452,6 +453,7 @@ var LeaveStore = (function () {
         var data = emptyData();
         state.configGrid = grid(res, 0);   // kept so writes can merge
         readConfigInto(grid(res, 0), data);
+        state.typesGrid = grid(res, 1);   // raw: readTypes() is lossy
         state.types = readTypes(grid(res, 1));
         readLeaveInto(grid(res, 2), state.types, data);
         readHolidaysInto(grid(res, 3), data);
@@ -665,6 +667,58 @@ var LeaveStore = (function () {
 
   var FIELD_NAMES = { b: "PTOB", nr: "parental", f: "flex holiday" };
 
+  /* A registry row for each field the app knows natively, so an orphan can
+     be adopted instead of merely reported. Same thirteen columns as
+     Code.gs's TYPE_DEFAULTS, and the same figures -- codegs.test.js pins
+     them together. */
+  var TYPE_SEED = {
+    b:  ["PTOB", "PTOB", "#2f9e5f", "biweekly", 6.7692, 8, 9, 240, 320,
+         "", "", false, true],
+    nr: ["Parental", "Parental", "#e05b8a", "grant", "", "", "", "", "",
+         480, 12, true, true],
+    f:  ["Flex", "Flex", "#0a63c2", "annual", "", "", "", "", "",
+         16, "", false, true],
+  };
+
+  /**
+   * Teach the Sheet about a type it has never heard of, when leave for that
+   * type is about to be pushed and would otherwise land in no column.
+   *
+   * Only a key the registry does not mention at all is seeded. A key that
+   * is present but Active=FALSE was switched off on purpose, and re-adding
+   * it would overrule the user; that case stays a warning.
+   *
+   * Returns the ranges to write, and mutates state.types so the very push
+   * that adds the row also writes the column -- a seed landing one sync
+   * later would push a column of zeros over the hours first.
+   */
+  function seedTypes(fields) {
+    var grid = state.typesGrid;
+    if (!grid || !grid.length) return [];       // no header read: do nothing
+    var known = {};
+    for (var i = 1; i < grid.length; i++) {
+      var k = grid[i] && grid[i][0];
+      if (k) known[String(k).trim().toLowerCase()] = true;
+    }
+    var out = [];
+    fields.forEach(function (f) {
+      var row = TYPE_SEED[f];
+      if (!row || known[row[0].toLowerCase()]) return;
+      // first row whose Key cell is blank, else straight past the end
+      var at = grid.length;
+      for (var i = 1; i < grid.length; i++) {
+        if (!(grid[i] && grid[i][0])) { at = i; break; }
+      }
+      var a1 = TAB.types + "!A" + (at + 1) + ":M" + (at + 1);
+      out.push({ range: a1, values: [row] });
+      while (grid.length <= at) grid.push([]);
+      grid[at] = row.slice();
+      known[row[0].toLowerCase()] = true;
+      state.types = readTypes(grid);
+    });
+    return out;
+  }
+
   function leaveRows(data, types) {
     var act = activeTypes(types);
     var head = ["Date"]
@@ -750,6 +804,26 @@ var LeaveStore = (function () {
    */
   function pushAll() {
     var data = state.cache;
+
+    // adopt orphans before the payload is built, so the new row and its
+    // column go up together
+    var orphans = orphanFields(data, state.types);
+    var seeded = seedTypes(Object.keys(orphans));
+    if (seeded.length) {
+      orphans = orphanFields(data, state.types);
+      log("info", "Added " + seeded.length + " leave type"
+        + (seeded.length > 1 ? "s" : "") + " to the Sheet's LeaveTypes tab "
+        + "so its hours have somewhere to go.");
+    }
+    var lost = Object.keys(orphans);
+    if (lost.length) {
+      log("error", lost.map(function (f) {
+        return orphans[f] + " h of " + (FIELD_NAMES[f] || f);
+      }).join(", ") + " cannot be saved: the Sheet's LeaveTypes tab has that "
+        + "type switched off, so there is no column for it. Set Active to "
+        + "TRUE on its row before saving again.");
+    }
+
     var payload = {
       valueInputOption: "RAW",
       data: [
@@ -759,16 +833,7 @@ var LeaveStore = (function () {
     };
     var cfg = configRows(data);
     if (cfg.length > 1) payload.data.push({ range: TAB.config, values: cfg });
-
-    var orphans = orphanFields(data, state.types);
-    var lost = Object.keys(orphans);
-    if (lost.length) {
-      log("error", lost.map(function (f) {
-        return orphans[f] + " h of " + (FIELD_NAMES[f] || f);
-      }).join(", ") + " cannot be saved: the Sheet's LeaveTypes tab has no "
-        + "such type, so there is no column for it. Add it to LeaveTypes "
-        + "(or run rebuild()) before saving again.");
-    }
+    seeded.forEach(function (w) { payload.data.push(w); });
 
     return assertUnchanged()
       .then(function () {
@@ -869,6 +934,9 @@ var LeaveStore = (function () {
                   readConfigInto: readConfigInto, readTypes: readTypes,
                   leaveRows: leaveRows, holidayRows: holidayRows,
                   fieldOf: fieldOf, orphanFields: orphanFields,
+                  seedTypes: seedTypes,
+                  setTypesGrid: function (g) { state.typesGrid = g; },
+                  typesOf: function () { return state.types; },
                   emptyData: emptyData, isoOf: isoOf,
                   loadPicker: loadPicker, pickShared: pickShared,
                   useFile: useFile, openOwn: openOwn,

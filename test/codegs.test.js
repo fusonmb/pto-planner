@@ -391,6 +391,60 @@ check("the shipped LeaveTypes registry carries the same rate", () => {
     throw new Error(`registry ${registryRate} != default ${gas.defaultRules_().rateBase}`);
 });
 
+check("TYPE_SEED matches Code.gs's TYPE_DEFAULTS row for row", () => {
+  /* Two copies of the registry seed now exist: Code.gs writes it on
+     setup(), sheets-store.js writes a single row when it adopts an orphan.
+     They describe the same leave types, so they have to agree -- a rate or
+     colour drifting between them would make a seeded row differ from a
+     set-up one for no visible reason. */
+  const fs = require("fs"), path = require("path");
+  const root = path.join(__dirname, "..");
+  const gasSrc = fs.readFileSync(path.join(root, "apps-script", "Code.gs"), "utf8");
+  const storeSrc = fs.readFileSync(path.join(root, "sheets-store.js"), "utf8");
+
+  const theme = {};
+  const themeBlock = /var THEME = \{([\s\S]*?)\};/.exec(gasSrc);
+  if (!themeBlock) throw new Error("THEME has moved in Code.gs");
+  for (const m of themeBlock[1].matchAll(/(\w+):\s*'([^']+)'/g))
+    theme[m[1]] = m[2];
+
+  const defBlock = /var TYPE_DEFAULTS = \[([\s\S]*?)\n\];/.exec(gasSrc);
+  if (!defBlock) throw new Error("TYPE_DEFAULTS has moved in Code.gs");
+  const gasRows = {};
+  for (const line of defBlock[1].split("\n")) {
+    const t = line.trim();
+    if (!t.startsWith("[")) continue;                      // comment line
+    const cells = t.replace(/^\[|\],?$/g, "").split(",").map((c) => c.trim());
+    gasRows[cells[0].replace(/'/g, "")] = cells.map((c) => {
+      if (c.startsWith("THEME.")) return theme[c.slice(6)];
+      if (c === "true") return true;
+      if (c === "false") return false;
+      if (/^'.*'$/.test(c)) return c.slice(1, -1);
+      return Number(c);
+    });
+  }
+  if (Object.keys(gasRows).length !== 3)
+    throw new Error("expected 3 TYPE_DEFAULTS rows, parsed "
+                    + Object.keys(gasRows).length);
+
+  const seedBlock = /var TYPE_SEED = \{([\s\S]*?)\n  \};/.exec(storeSrc);
+  if (!seedBlock) throw new Error("TYPE_SEED has moved in sheets-store.js");
+  // eslint-disable-next-line no-new-func
+  const seed = new Function("return {" + seedBlock[1] + "};")();
+  if (Object.keys(seed).length !== 3)
+    throw new Error("expected 3 TYPE_SEED rows, got " + Object.keys(seed).length);
+
+  for (const field of Object.keys(seed)) {
+    const row = seed[field];
+    const gasRow = gasRows[row[0]];
+    if (!gasRow)
+      throw new Error(`TYPE_SEED has "${row[0]}", TYPE_DEFAULTS does not`);
+    if (JSON.stringify(row) !== JSON.stringify(gasRow))
+      throw new Error(`${row[0]} differs:\n  store  ${JSON.stringify(row)}`
+                      + `\n  Code.gs ${JSON.stringify(gasRow)}`);
+  }
+});
+
 console.log(`\n${pass} passed, ${failures.length} failed`);
 if (failures.length) {
   console.log("\nFAILURES:");

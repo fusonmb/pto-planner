@@ -424,6 +424,99 @@ check("pushAll actually consults orphanFields", () => {
   const push = body.slice(0, body.indexOf("\n  }\n"));
   ok(/orphanFields\(/.test(push), "pushAll never calls orphanFields");
   ok(/log\("error"/.test(push), "pushAll notices orphans but says nothing");
+  ok(/seedTypes\(/.test(push), "pushAll never calls seedTypes");
+  /* order is the whole point: seeding after the payload is built would send
+     the new registry row without the column it exists for, and the next
+     pull would read zeros over the hours */
+  ok(push.indexOf("seedTypes(") < push.indexOf("leaveRows("),
+     "pushAll seeds the type after building the Leave rows");
+  ok(/seeded\.forEach/.test(push), "the seeded row is never pushed");
+});
+
+/* ------------------------------------- adopting an orphaned type */
+/* Warning about lost hours is better than losing them silently, but the
+   app knows its own three leave types, so it can add the registry row
+   itself. It must do so in the same push that writes the column, and must
+   not overrule a type the user switched off on purpose. */
+
+const TYPES_GRID = [
+  ["Key", "Label", "Color", "Model", "Rate", "RateAfter", "StepYears",
+   "Cap", "CapAfter", "GrantHours", "ExpiresMonths", "WholeHoursOnly",
+   "Active"],
+  ["PTOB", "PTOB", "#2f9e5f", "biweekly", 6.7692, 8, 9, 240, 320,
+   "", "", "FALSE", "TRUE"],
+  ["Parental", "Parental", "#e05b8a", "grant", "", "", "", "", "",
+   480, 12, "TRUE", "TRUE"],
+];
+
+const gridCopy = () => TYPES_GRID.map((r) => r.slice());
+
+check("an unknown type is seeded into the first blank LeaveTypes row", () => {
+  I.setTypesGrid(gridCopy());
+  const writes = I.seedTypes(["f"]);
+  eq(writes.length, 1, "nothing was seeded");
+  eq(writes[0].range, "LeaveTypes!A4:M4", "wrong row: " + writes[0].range);
+  const row = writes[0].values[0];
+  eq(row[0], "Flex", "key");
+  eq(row[3], "annual", "model -- this is what maps it to the f column");
+  eq(row[12], true, "a seeded row that is not Active buys nothing");
+});
+
+check("seeding updates state.types so the same push writes the column", () => {
+  I.setTypesGrid(gridCopy());
+  I.seedTypes(["f"]);
+  const rows = I.leaveRows({entries: {"2025-11-21": {b: 0, nr: 0, f: 8,
+                                                     label: "flex"}}},
+                           I.typesOf());
+  eq(rows[0], ["Date", "PTOB", "Parental", "Flex", "Label", "Updated"],
+     "header: " + JSON.stringify(rows[0]));
+  eq(rows[1][3], 8, "the flex hours still went nowhere: "
+                    + JSON.stringify(rows[1]));
+});
+
+check("a type switched off on purpose is left alone", () => {
+  const grid = gridCopy();
+  grid.push(["Flex", "Flex", "#0a63c2", "annual", "", "", "", "", "",
+             16, "", "FALSE", "FALSE"]);
+  I.setTypesGrid(grid);
+  eq(I.seedTypes(["f"]).length, 0,
+     "re-added a type the user had deactivated");
+});
+
+check("seeding is idempotent across two pushes", () => {
+  I.setTypesGrid(gridCopy());
+  eq(I.seedTypes(["f"]).length, 1, "first push");
+  eq(I.seedTypes(["f"]).length, 0, "second push seeded a duplicate row");
+});
+
+check("a key differing only in case is still the same type", () => {
+  const grid = gridCopy();
+  grid.push(["flex", "Flex", "#0a63c2", "annual", "", "", "", "", "",
+             16, "", "FALSE", "TRUE"]);
+  I.setTypesGrid(grid);
+  eq(I.seedTypes(["f"]).length, 0, "added a second Flex row");
+});
+
+check("a field the app has no seed for is not invented", () => {
+  I.setTypesGrid(gridCopy());
+  eq(I.seedTypes(["sick"]).length, 0, "invented a registry row");
+});
+
+check("nothing is seeded when the registry was never read", () => {
+  I.setTypesGrid(null);
+  eq(I.seedTypes(["f"]).length, 0,
+     "wrote to LeaveTypes without knowing what is there");
+  I.setTypesGrid([]);
+  eq(I.seedTypes(["f"]).length, 0, "same for an empty grid");
+});
+
+check("a gap in the middle of the registry is filled, not skipped", () => {
+  const grid = gridCopy();
+  grid.splice(2, 0, []);            // blank row between PTOB and Parental
+  I.setTypesGrid(grid);
+  const writes = I.seedTypes(["f"]);
+  eq(writes.length, 1, "nothing seeded");
+  eq(writes[0].range, "LeaveTypes!A3:M3", "did not reuse the blank row");
 });
 
 /* ----------------------------------------------- Config round-trip */

@@ -32,7 +32,7 @@ Personal leave-planning app for mfuson (MITRE). **One build** as of
 
 ## Tests
 
-`node test/run.js` — all four suites (167 tests). Individually:
+`node test/run.js` — all four suites (176 tests). Individually:
 `ui.test.js` drives the real page in a browser (Playwright) and covers the
 balance editor, which no node-level suite can reach. It **skips itself**
 when Playwright is not installed, so the runner still works without it —
@@ -163,12 +163,19 @@ Shared:
   the app saves. The Dashboard refreshes on open and daily.
 - `Config` needs `anchorBalance` as well as `anchorSunday`; an anchor date
   with no balance is ignored rather than seeded at zero.
-- The Leave tab's columns come from the `LeaveTypes` registry, and the
-  push is a whole-tab rewrite, so hours of a type the Sheet has never
-  been told about are written nowhere and are gone on the next read.
-  (That ate a 32 h flex import.) `orphanFields()` now counts them and
-  `pushAll` logs an error naming the hours — adding a type means adding
-  its `LeaveTypes` row (by hand in the Sheet is enough) or `rebuild()`.
+- The Leave tab's columns come from the `LeaveTypes` registry **by
+  position** (`readLeaveInto` reads `r[1 + c]`, not by header name), and
+  the push is a whole-tab rewrite. So hours of a type the Sheet has
+  never been told about are written nowhere and are gone on the next
+  read — that ate a 32 h flex import silently. Two guards now:
+  `orphanFields()` counts hours no active type maps to, and `seedTypes()`
+  appends the missing `LeaveTypes` row from `TYPE_SEED` (the app knows
+  its own three types) in the **same** push that writes the column —
+  seeding a push later would send the row and then pull zeros over the
+  hours, so `store.test.js` pins that order. A key that is present but
+  `Active=FALSE` was switched off deliberately and is never re-added;
+  that stays an error naming the hours. `TYPE_SEED` duplicates Code.gs's
+  `TYPE_DEFAULTS`, and `codegs.test.js` compares them row for row.
 - Drive permissions are the whole permission model. `readOnlyBlock()` gates
   all five mutating entry points so a Viewer cannot write through any path.
 
