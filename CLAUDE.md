@@ -32,7 +32,7 @@ Personal leave-planning app for mfuson (MITRE). **One build** as of
 
 ## Tests
 
-`node test/run.js` — all four suites (162 tests). Individually:
+`node test/run.js` — all four suites (167 tests). Individually:
 `ui.test.js` drives the real page in a browser (Playwright) and covers the
 balance editor, which no node-level suite can reach. It **skips itself**
 when Playwright is not installed, so the runner still works without it —
@@ -111,7 +111,9 @@ Shared:
 - Calendar: drag to select range (desktop); long-press-then-tap on touch.
   Editor: h/day box pre-filled with 8, label field gets focus on desktop
   (no autofocus on touch — keyboard pop-up is unwanted). Buttons:
-  Save (PTOB) green, Save (Parent) pink, Clear. Enter = Save PTOB.
+  the type name alone (`PTOB` green, `Parental` pink, `Flex` blue --
+  the word "Save" was redundant on all three), plus Clear. The action is
+  in the `title`. Enter = save PTOB.
 - Calendar shading alternates by pay period (NOT weekends); periods end on
   grid Sundays; out-of-month cells keep shading, only the date number dims.
   Period Sundays show "bal N" in-cell.
@@ -161,6 +163,12 @@ Shared:
   the app saves. The Dashboard refreshes on open and daily.
 - `Config` needs `anchorBalance` as well as `anchorSunday`; an anchor date
   with no balance is ignored rather than seeded at zero.
+- The Leave tab's columns come from the `LeaveTypes` registry, and the
+  push is a whole-tab rewrite, so hours of a type the Sheet has never
+  been told about are written nowhere and are gone on the next read.
+  (That ate a 32 h flex import.) `orphanFields()` now counts them and
+  `pushAll` logs an error naming the hours — adding a type means adding
+  its `LeaveTypes` row (by hand in the Sheet is enough) or `rebuild()`.
 - Drive permissions are the whole permission model. `readOnlyBlock()` gates
   all five mutating entry points so a Viewer cannot write through any path.
 

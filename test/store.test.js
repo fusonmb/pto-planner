@@ -375,6 +375,57 @@ check("a day carrying only flex is not dropped on read", () => {
   eq(back.entries["2026-11-23"].f, 8, "flex hours");
 });
 
+/* ------------------------------------------ orphaned leave types */
+/* The whole-tab rewrite is destructive: hours belonging to a type the
+   Sheet's registry does not list get written nowhere and vanish on the
+   next read. That happened to a 32 h flex-holiday import. The push now
+   has to notice and say so. */
+
+const TYPES_NO_FLEX = TYPES_WITH_FLEX.slice(0, 2);
+
+check("flex hours with no Flex column are reported, not swallowed", () => {
+  const data = {entries: {
+    "2025-11-20": {b: 4, nr: 0, f: 4, label: "flex holiday"},
+    "2025-11-21": {b: 0, nr: 0, f: 8, label: "flex holiday"},
+  }};
+  const orphans = I.orphanFields(data, TYPES_NO_FLEX);
+  eq(orphans.f, 12, "flex hours were not counted as orphaned");
+  ok(!("b" in orphans), "PTOB has a column and must not be flagged");
+  ok(!("label" in orphans), "the label is not a leave type");
+});
+
+check("nothing is flagged once the Flex column exists", () => {
+  const data = {entries: {"2025-11-21": {b: 0, nr: 0, f: 8, label: ""}}};
+  eq(Object.keys(I.orphanFields(data, TYPES_WITH_FLEX)).length, 0,
+     "a mapped type was flagged as orphaned");
+});
+
+check("zero hours of an unmapped type are not worth a warning", () => {
+  const data = {entries: {"2025-11-21": {b: 8, nr: 0, f: 0, label: ""}}};
+  eq(Object.keys(I.orphanFields(data, TYPES_NO_FLEX)).length, 0,
+     "0 h of flex raised a false alarm");
+});
+
+check("an inactive type does not count as having a column", () => {
+  const off = TYPES_WITH_FLEX.map((t) =>
+    t.key === "Flex" ? Object.assign({}, t, {active: false}) : t);
+  const data = {entries: {"2025-11-21": {b: 0, nr: 0, f: 8, label: ""}}};
+  eq(I.orphanFields(data, off).f, 8,
+     "flex is inactive, so leaveRows drops the column and the hours");
+});
+
+check("pushAll actually consults orphanFields", () => {
+  /* orphanFields is only useful if the destructive write path calls it.
+     pushAll needs live gapi to run, so the wiring is checked in the
+     source: a warning nobody raises is the exact bug this guards. */
+  const src = require("fs").readFileSync(
+    require("path").join(__dirname, "..", "sheets-store.js"), "utf8");
+  const body = src.slice(src.indexOf("function pushAll"));
+  const push = body.slice(0, body.indexOf("\n  }\n"));
+  ok(/orphanFields\(/.test(push), "pushAll never calls orphanFields");
+  ok(/log\("error"/.test(push), "pushAll notices orphans but says nothing");
+});
+
 /* ----------------------------------------------- Config round-trip */
 /* The Config tab holds eight keys; the app manages four. It used to write
    only its four over the top of the tab without clearing, so every later

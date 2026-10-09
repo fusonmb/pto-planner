@@ -638,6 +638,33 @@ var LeaveStore = (function () {
       });
   }
 
+  /**
+   * Hours whose leave type has no column on the Leave tab. The registry
+   * decides the columns, so a type the Sheet has not been told about is
+   * written nowhere -- and the whole-tab rewrite then destroys those hours
+   * on the next read. That happened to a flex-holiday import: the figures
+   * were simply gone, with nothing said. Say something.
+   */
+  function orphanFields(data, types) {
+    var mapped = {};
+    activeTypes(types).forEach(function (t) {
+      var f = fieldOf(t);
+      if (f) mapped[f] = true;
+    });
+    var orphans = {};
+    for (var d in data.entries) {
+      var e = data.entries[d];
+      for (var f in e) {
+        if (f === "label" || mapped[f]) continue;
+        var h = Number(e[f]) || 0;
+        if (h > 0) orphans[f] = Math.round(((orphans[f] || 0) + h) * 100) / 100;
+      }
+    }
+    return orphans;
+  }
+
+  var FIELD_NAMES = { b: "PTOB", nr: "parental", f: "flex holiday" };
+
   function leaveRows(data, types) {
     var act = activeTypes(types);
     var head = ["Date"]
@@ -732,6 +759,16 @@ var LeaveStore = (function () {
     };
     var cfg = configRows(data);
     if (cfg.length > 1) payload.data.push({ range: TAB.config, values: cfg });
+
+    var orphans = orphanFields(data, state.types);
+    var lost = Object.keys(orphans);
+    if (lost.length) {
+      log("error", lost.map(function (f) {
+        return orphans[f] + " h of " + (FIELD_NAMES[f] || f);
+      }).join(", ") + " cannot be saved: the Sheet's LeaveTypes tab has no "
+        + "such type, so there is no column for it. Add it to LeaveTypes "
+        + "(or run rebuild()) before saving again.");
+    }
 
     return assertUnchanged()
       .then(function () {
@@ -831,7 +868,7 @@ var LeaveStore = (function () {
     _internals: { readLeaveInto: readLeaveInto, readHolidaysInto: readHolidaysInto,
                   readConfigInto: readConfigInto, readTypes: readTypes,
                   leaveRows: leaveRows, holidayRows: holidayRows,
-                  fieldOf: fieldOf,
+                  fieldOf: fieldOf, orphanFields: orphanFields,
                   emptyData: emptyData, isoOf: isoOf,
                   loadPicker: loadPicker, pickShared: pickShared,
                   useFile: useFile, openOwn: openOwn,
